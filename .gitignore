@@ -1,0 +1,31 @@
+# Python environments and generated files
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+.coverage
+htmlcov/
+
+# Downloaded models and training output
+.cache/
+artifacts/
+checkpoints/
+runs/
+wandb/
+*.safetensors
+*.pt
+*.pth
+
+# Local settings and OS files
+.env
+.env.*
+!.env.example
+.DS_Store
+*.log

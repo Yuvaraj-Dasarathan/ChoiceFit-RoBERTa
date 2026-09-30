@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=65"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ChoiceFit-RoBERTa"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = ["torch>=2.6,<3", "transformers>=4.46,<5"]
+
+[project.urls]
+Repository = "https://github.com/yuvarajd2588/ChoiceFit-RoBERTa"
+
+[project.optional-dependencies]
+test = ["pytest>=8,<9"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
