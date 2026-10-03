@@ -19,6 +19,8 @@ artifacts/
 checkpoints/
 runs/
 wandb/
+data/raw/
+data/typed-*/
 *.safetensors
 *.pt
 *.pth

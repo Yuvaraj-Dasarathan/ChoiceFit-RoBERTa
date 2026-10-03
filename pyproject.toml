@@ -13,9 +13,13 @@ Repository = "https://github.com/yuvarajd2588/ChoiceFit-RoBERTa"
 
 [project.optional-dependencies]
 test = ["pytest>=8,<9"]
+data = ["datasets>=3,<5"]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.setuptools]
+packages = ["choicefit_roberta"]
+
+[tool.setuptools.package-dir]
+choicefit_roberta = "src"
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

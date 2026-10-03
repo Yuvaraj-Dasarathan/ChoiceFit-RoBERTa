@@ -1,77 +1,166 @@
-"""Local or single-instance SageMaker training entry point."""
+"""Stream JSONL data for single-device training of the shared choice scorer."""
 import argparse
 import json
 import os
-import random
+from itertools import islice
 from pathlib import Path
+from time import monotonic
 
 import torch
 from transformers import set_seed
 
-from .model import ChoiceModel, read_data
+from .data import audit_splits, batches, buffered_shuffle
+from .model import ChoiceModel, iter_data
 
 
 def targets(rows, device):
-    return torch.tensor([list(r["choices"]).index(r["label"]) for r in rows], device=device)
+    probabilities = [torch.tensor(
+        [r["target"][key] if "target" in r else float(key == r["label"])
+         for key in r["choices"]], dtype=torch.float32, device=device) for r in rows]
+    return torch.nn.utils.rnn.pad_sequence(probabilities, batch_first=True, padding_value=0.0)
+
+
+def choice_loss(logits, probabilities):
+    # Padded logits are -inf and padded targets are zero. Mask BEFORE the
+    # product to avoid 0 * -inf producing NaN for variable choice counts.
+    log_probabilities = logits.log_softmax(-1).masked_fill(probabilities == 0, 0.0)
+    return -(probabilities * log_probabilities).sum(-1)
 
 
 @torch.inference_mode()
-def evaluate(model, rows, batch_size):
+def evaluate(model, rows, batch_size, pair_batch_size=16, prediction_sink=None):
     model.model.eval()
-    correct = total_loss = 0
-    for start in range(0, len(rows), batch_size):
-        batch = rows[start:start + batch_size]
-        logits = model.logits(batch)
+    correct = hard_examples = examples = modal_correct = 0
+    total_loss = target_mass = brier = 0.0
+    for batch in batches(rows, batch_size):
+        logits = model.logits(batch, pair_batch_size=pair_batch_size)
         labels = targets(batch, model.device)
-        total_loss += torch.nn.functional.cross_entropy(logits, labels, reduction="sum").item()
-        correct += (logits.argmax(-1) == labels).sum().item()
-    return {"accuracy": correct / len(rows), "loss": total_loss / len(rows), "examples": len(rows)}
+        losses = choice_loss(logits, labels)
+        if not torch.isfinite(losses).all():
+            raise ValueError("Non-finite evaluation loss")
+        total_loss += losses.sum().item()
+        predicted = logits.argmax(-1)
+        mass = labels.gather(1, predicted[:, None]).squeeze(1)
+        hard = (labels == 1).sum(-1) == 1
+        correct += ((mass == 1) & hard).sum().item()
+        hard_examples += hard.sum().item()
+        modal_correct += (mass >= labels.max(-1).values - 1e-6).sum().item()
+        target_mass += mass.sum().item()
+        brier += ((logits.softmax(-1) - labels) ** 2).sum().item()
+        if prediction_sink is not None:
+            predictions = logits.softmax(-1).cpu().tolist()
+            for row, probabilities in zip(batch, predictions):
+                keys = list(row["choices"])
+                probabilities = probabilities[:len(keys)]
+                best = max(range(len(keys)), key=probabilities.__getitem__)
+                prediction_sink.write(json.dumps({
+                    "id": row.get("id"), "source": row.get("source"),
+                    "message": row["message"], "question": row.get("question"),
+                    "choices": row["choices"], "target": row.get("target", row.get("label")),
+                    "choice": keys[best], "description": row["choices"][keys[best]],
+                    "probabilities": dict(zip(keys, probabilities))}) + "\n")
+        examples += len(batch)
+    if not examples:
+        raise ValueError("Evaluation dataset is empty")
+    return {"accuracy": correct / hard_examples if hard_examples else None,
+            "hard_examples": hard_examples, "soft_examples": examples - hard_examples,
+            "top_target_accuracy": modal_correct / examples,
+            "mean_selected_target_probability": target_mass / examples,
+            "brier_score": brier / examples, "loss": total_loss / examples, "examples": examples}
+
+
+def train_epoch(model, optimizer, rows, batch_size, max_pairs, accumulation_steps, log_every=100):
+    model.model.train()
+    iterator = iter(batches(rows, batch_size, max_pairs))
+    total_loss = 0.0
+    examples = updates = 0
+    started = monotonic()
+    while group := list(islice(iterator, accumulation_steps)):
+        # Weight by messages, not microbatches: pair budgets and the last batch
+        # can produce unequal microbatch sizes.
+        group_examples = sum(len(batch) for batch in group)
+        optimizer.zero_grad(set_to_none=True)
+        for batch in group:
+            loss_sum = choice_loss(model.logits(batch), targets(batch, model.device)).sum()
+            if not torch.isfinite(loss_sum):
+                raise ValueError("Non-finite training loss; stopping before optimizer update")
+            (loss_sum / group_examples).backward()
+            total_loss += loss_sum.detach().item()
+            examples += len(batch)
+        torch.nn.utils.clip_grad_norm_(model.model.parameters(), 1.0, error_if_nonfinite=True)
+        optimizer.step()
+        updates += 1
+        if log_every and updates % log_every == 0:
+            print(json.dumps({"updates": updates, "messages": examples,
+                              "train_loss": total_loss / examples,
+                              "elapsed_seconds": round(monotonic() - started, 1)}), flush=True)
+    if not examples:
+        raise ValueError("Training dataset is empty")
+    return {"train_loss": total_loss / examples, "examples": examples, "updates": updates,
+            "train_seconds": round(monotonic() - started, 2)}
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--train", default=os.path.join(os.getenv("SM_CHANNEL_TRAIN", "data"), "train.jsonl"))
-    parser.add_argument("--validation", default=os.path.join(os.getenv("SM_CHANNEL_VALIDATION", "data"), "validation.jsonl"))
-    parser.add_argument("--output", default=os.getenv("SM_MODEL_DIR", "artifacts/choicefit-roberta"))
+    parser.add_argument("--train", default=os.path.join(os.getenv("SM_CHANNEL_TRAIN", "data/typed-local"), "train.jsonl"))
+    parser.add_argument("--validation", default=os.path.join(os.getenv("SM_CHANNEL_VALIDATION", "data/typed-local"), "validation.jsonl"))
+    parser.add_argument("--output", default=os.getenv("SM_MODEL_DIR", "artifacts/typed-local-v1"))
     parser.add_argument("--model", default="FacebookAI/roberta-base")
-    parser.add_argument("--epochs", type=int, default=8)
-    parser.add_argument("--batch-size", type=int, default=4, help="Messages per batch; each expands to all its choices")
+    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument("--batch-size", type=int, default=4, help="Maximum messages per microbatch")
+    parser.add_argument("--max-pairs", type=int, default=32, help="Maximum candidate pairs per training microbatch")
+    parser.add_argument("--gradient-accumulation-steps", type=int, default=1)
+    parser.add_argument("--gradient-checkpointing", action="store_true", help="Trade extra computation for lower activation memory")
+    parser.add_argument("--shuffle-buffer", type=int, default=10000, help="Maximum buffered training records")
+    parser.add_argument("--eval-pair-batch-size", type=int, default=16)
+    parser.add_argument("--log-every", type=int, default=100, help="Optimizer updates between progress reports")
     parser.add_argument("--learning-rate", type=float, default=2e-5)
     parser.add_argument("--max-length", type=int, default=192)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default=None)
     args = parser.parse_args()
-    if args.epochs < 1 or args.batch_size < 1 or args.learning_rate <= 0:
-        parser.error("epochs, batch-size and learning-rate must be positive")
+    positive = (args.epochs, args.batch_size, args.max_pairs, args.gradient_accumulation_steps,
+                args.shuffle_buffer, args.eval_pair_batch_size, args.log_every, args.learning_rate)
+    if min(positive) <= 0:
+        parser.error("Epochs, batch/buffer limits, accumulation steps, log interval, and learning rate must be positive")
+    if not 16 <= args.max_length <= 512:
+        parser.error("max-length must be between 16 and 512")
+    output = Path(args.output)
+    if output.exists() and any(output.iterdir()):
+        parser.error("Output directory is not empty; choose a new --output to preserve existing checkpoints")
     set_seed(args.seed)
     torch.set_num_threads(min(8, os.cpu_count() or 1))
-    train, validation = read_data(args.train), read_data(args.validation)
-    if {r["message"] for r in train} & {r["message"] for r in validation}:
-        raise ValueError("Training and validation messages overlap")
+    counts = audit_splits(args.train, args.validation, args.max_pairs)
+    print(json.dumps({"dataset_counts": counts}), flush=True)
     model = ChoiceModel(args.model, args.device, args.max_length)
+    print(json.dumps({"device": str(model.device), "max_length": model.max_length}), flush=True)
+    if args.gradient_checkpointing:
+        model.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     optimizer = torch.optim.AdamW(model.model.parameters(), lr=args.learning_rate, weight_decay=0.01)
-    history = [{"epoch": 0, "validation": evaluate(model, validation, args.batch_size)}]
-    print(json.dumps(history[-1]), flush=True)
+    output.mkdir(parents=True, exist_ok=True)
+    history = []
     best = float("inf")
-    for epoch in range(1, args.epochs + 1):
-        model.model.train()
-        random.shuffle(train)
-        total_loss = 0
-        for start in range(0, len(train), args.batch_size):
-            batch = train[start:start + args.batch_size]
-            optimizer.zero_grad(set_to_none=True)
-            loss = torch.nn.functional.cross_entropy(model.logits(batch), targets(batch, model.device))
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.model.parameters(), 1.0)
-            optimizer.step()
-            total_loss += loss.item() * len(batch)
-        metrics = evaluate(model, validation, args.batch_size)
-        history.append({"epoch": epoch, "train_loss": total_loss / len(train), "validation": metrics})
-        print(json.dumps(history[-1]), flush=True)
-        if metrics["loss"] < best:
-            best = metrics["loss"]
-            model.save(args.output)
-    Path(args.output, "training_metrics.json").write_text(json.dumps({"arguments": vars(args), "history": history}, indent=2))
+    for epoch in range(args.epochs + 1):
+        metrics = {"epoch": epoch}
+        started = monotonic()
+        if epoch:
+            rows = buffered_shuffle(iter_data(args.train), args.shuffle_buffer, args.seed + epoch)
+            metrics.update(train_epoch(model, optimizer, rows, args.batch_size, args.max_pairs,
+                                       args.gradient_accumulation_steps, args.log_every))
+        print(json.dumps({"epoch": epoch, "phase": "validation"}), flush=True)
+        metrics["validation"] = evaluate(model, iter_data(args.validation), args.batch_size, args.eval_pair_batch_size)
+        metrics["epoch_seconds"] = round(monotonic() - started, 2)
+        history.append(metrics)
+        print(json.dumps(metrics), flush=True)
+        # Baseline is diagnostic only. The inference artifact must contain
+        # trained weights, even if a tiny smoke run does not improve validation.
+        if epoch and metrics["validation"]["loss"] < best:
+            best = metrics["validation"]["loss"]
+            model.save(output)
+        # Preserve metrics after every epoch, including the initial baseline.
+        temporary = output / "training_metrics.json.tmp"
+        temporary.write_text(json.dumps({"arguments": vars(args), "history": history}, indent=2))
+        temporary.replace(output / "training_metrics.json")
 
 
 if __name__ == "__main__":

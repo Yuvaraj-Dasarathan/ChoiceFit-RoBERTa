@@ -1,7 +1,7 @@
 import pytest
 import torch
 from transformers import RobertaConfig, RobertaForSequenceClassification
-from choicefit_roberta.model import validate, grouped_logits, ChoiceModel
+from src.model import validate, grouped_logits, ChoiceModel
 
 
 def test_variable_choices_loss():
@@ -40,7 +40,7 @@ def test_real_encoder_gradient_and_roundtrip(tmp_path):
 
 
 def test_pair_encoding_uses_question_and_description_not_id():
-    from choicefit_roberta.model import encode
+    from src.model import encode
     captured = {}
     def tokenizer(contexts, candidates, **kwargs):
         captured.update(contexts=contexts, candidates=candidates)
