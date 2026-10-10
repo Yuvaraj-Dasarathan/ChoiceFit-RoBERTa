@@ -100,11 +100,13 @@ def test_training_cli_saves_reloadable_checkpoint(tmp_path, monkeypatch):
     train.write_text("".join(json.dumps(row(str(i))) + "\n" for i in range(5)))
     validation.write_text(json.dumps(row("held out")) + "\n")
     output = tmp_path / "trained"
+    checkpoints = tmp_path / "checkpoints"
     monkeypatch.setattr("sys.argv", ["train", "--model", str(checkpoint), "--train", str(train),
                                     "--validation", str(validation), "--output", str(output),
                                     "--epochs", "1", "--batch-size", "2", "--max-pairs", "4",
                                     "--gradient-accumulation-steps", "2", "--gradient-checkpointing",
-                                    "--max-length", "16", "--device", "cpu"])
+                                    "--max-length", "16", "--device", "cpu",
+                                    "--checkpoint-dir", str(checkpoints), "--checkpoint-every", "1"])
     main()
     metrics = json.loads((output / "training_metrics.json").read_text())
     assert metrics["history"][1]["updates"] == 2
@@ -112,3 +114,12 @@ def test_training_cli_saves_reloadable_checkpoint(tmp_path, monkeypatch):
     result = evaluate(restored, iter_data(validation), batch_size=1, pair_batch_size=1)
     assert result["examples"] == 1
     assert torch.isfinite(torch.tensor(result["loss"]))
+    # Completed recovery must re-export the best model in a fresh output dir.
+    original_weights = {k: v.clone() for k, v in restored.model.state_dict().items()}
+    import sys
+    recovered_output = tmp_path / "recovered"
+    sys.argv[sys.argv.index("--output") + 1] = str(recovered_output)
+    main()
+    recovered = ChoiceModel(recovered_output, device="cpu")
+    assert all(torch.equal(value, recovered.model.state_dict()[key]) for key, value in original_weights.items())
+    assert len(json.loads((recovered_output / "training_metrics.json").read_text())["history"]) == 2

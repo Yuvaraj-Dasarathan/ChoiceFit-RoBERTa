@@ -1,0 +1,5 @@
+# Torch/CUDA are provided by the pinned AWS PyTorch training image.
+transformers==4.57.6
+huggingface-hub==0.36.2
+tokenizers==0.22.2
+safetensors==0.7.0

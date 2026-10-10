@@ -52,7 +52,9 @@ python -m src.infer \
   --pair-batch-size 2 --device mps
 ```
 
-To try the already-verified smoke model, add `--model artifacts/typed-mps-verified`. For custom inputs, supply `--message`, `--question`, and an explicit `--choices` JSON mapping. Add `--debug` to inspect tensor shapes and intermediate scores.
+To try the retained local model, add `--model artifacts/typed-local-recovery-v1`. For custom inputs, supply `--message`, `--question`, and an explicit `--choices` JSON mapping. Add `--debug` to inspect tensor shapes and intermediate scores.
+
+The completed 1,000-example run is at `artifacts/typed-local-recovery-v1`; pass that path with `--model` to evaluate or infer from it. Validation accuracy was 31% and held-out test accuracy was 38%, close to random-choice expectation on these samples. See [the recorded results](docs/sagemaker.md#actual-local-result) before planning a larger paid run.
 
 Each training record contains `message`, `question`, `choices`, and a `target` mapping choice IDs to probabilities. A single `label` is also supported for hard-target examples. Inference returns the winning ID and probabilities over all supplied choices. These probabilities are not calibrated confidence, and the model always selects a supplied choice.
 
@@ -60,4 +62,4 @@ Each training record contains `message`, `question`, `choices`, and a `target` m
 
 Run `python -m pytest -q`. Local MPS training, checkpoint reload, and inference have been verified; details are in the guide. A small smoke run validates the pipeline, not generalization to arbitrary descriptions.
 
-The trainer respects `SM_CHANNEL_TRAIN`, `SM_CHANNEL_VALIDATION`, and `SM_MODEL_DIR`. After installation, use `python -m choicefit_roberta.train` outside the checkout. SageMaker deployment, optimizer-state resume, and periodic recovery checkpoints are not yet implemented. No AWS resources have been created.
+The trainer respects `SM_CHANNEL_TRAIN`, `SM_CHANNEL_VALIDATION`, and `SM_MODEL_DIR`. After installation, use `python -m choicefit_roberta.train` outside the checkout. See [the SageMaker guide](docs/sagemaker.md) for the low-cost single-GPU pilot, dry-run launcher, and recovery checkpoints. The cloud integration is prepared but has not run on AWS; no AWS resources have been created.

@@ -11,16 +11,16 @@ This Mac is an M1 MacBook Air with 16 GiB unified memory. PyTorch's MPS device w
 | Stage | Train | Validation | Test | Status |
 | --- | ---: | ---: | ---: | --- |
 | Code smoke test | 32 | 16 | 16 available; 100 evaluated | Completed on MPS |
-| First learning run | 1,000 | 100 | 100 | Prepared; training not yet started |
-| Later local experiment | 5,000 | 500 | 500 | Suggested next size; not prepared or benchmarked |
+| First learning run | 1,000 | 100 | 100 | Completed; 31% validation, 38% test accuracy |
+| Later local experiment | 5,000 | 500 | 500 | Defer until smaller experiments show learning |
 
 Prepared samples: `data/typed-local/`. The training sample spans 317 sources and includes 12 soft-target examples. Validation spans 69 sources and test spans 67. These particular validation/test samples have only one-hot targets. This means they do not adequately evaluate soft-target generalization; use an additional soft-target evaluation subset for that later.
 
-The small smoke sample is in `data/typed-smoke/`. It deliberately includes the soft examples to exercise probability-target training. Its verified checkpoint is `artifacts/typed-mps-verified/`. The earlier `artifacts/typed-smoke-mps/` was a diagnostic run whose best checkpoint was the untrained baseline; use `typed-mps-verified`, not that earlier directory.
+The small smoke sample is in `data/typed-smoke/`. It deliberately includes the soft examples to exercise probability-target training. Its older trained models were removed after verification; the input files remain for the AWS pilot. The retained model is `artifacts/typed-local-recovery-v1/`, trained on 1,000 examples.
 
 Observed verification:
 
-- 24 automated tests pass, including soft-target validation, finite padded loss and gradients, accumulation, group overlap checks, export, and training/save/reload.
+- 29 automated tests pass, including soft-target validation, finite padded loss and gradients, accumulation, group overlap checks, export, and training/save/reload.
 - The verified full RoBERTa-base smoke run took about 20 seconds wall time; its 32-message training portion took 12 seconds. The earlier run took 17 seconds for training. These are short-run measurements, not sustained throughput promises.
 - The verified run reported a peak memory footprint of 4.36 GB (about 4.1 GiB), using batch size 1, up to four choices, 192 tokens, and gradient checkpointing.
 - Checkpoint comparison confirmed changes in both the classification head and an encoder attention matrix.
@@ -87,7 +87,7 @@ python -m src.evaluate \
 
 The predictions file must not already exist. It includes input, question, descriptions, target, predicted ID, winning description, and probabilities so results can be inspected without another forward pass.
 
-Run one prediction (replace the model with `artifacts/typed-mps-verified` to try the already-tested smoke model immediately):
+Run one prediction (replace the model with `artifacts/typed-local-recovery-v1` to try the retained 1,000-example model immediately):
 
 ```bash
 python -m src.infer \
@@ -138,4 +138,4 @@ The official validation/test sources may also occur in training. These splits me
 
 The package now installs as `choicefit_roberta`; both `python -m src.train` from the checkout and `python -m choicefit_roberta.train` after installation work. The trainer retains `SM_CHANNEL_TRAIN`, `SM_CHANNEL_VALIDATION`, and `SM_MODEL_DIR` defaults. No AWS resources have been created.
 
-Before a costly long run, add optimizer-state resume, periodic recovery checkpoints, CUDA precision tuning, and a proper SageMaker container/entrypoint. Loading `--model` continues from model weights only; it is not optimizer-state resume. This local experiment validates the data/loss/model path, not a complete managed training deployment.
+Recovery checkpoints and a SageMaker entrypoint/launcher have now been added; see [the SageMaker guide](sagemaker.md). Use `--checkpoint-dir` to enable full-state recovery. Loading `--model` alone still loads only model weights. The exact AWS image, CUDA execution, account permissions, and S3 restoration need a short cloud pilot before a costly run.

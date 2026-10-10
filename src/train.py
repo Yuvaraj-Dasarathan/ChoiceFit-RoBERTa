@@ -11,6 +11,7 @@ from transformers import set_seed
 
 from .data import audit_splits, batches, buffered_shuffle
 from .model import ChoiceModel, iter_data
+from .checkpoint import file_digest, load_recovery, save_recovery, rng_state, restore_rng
 
 
 def targets(rows, device):
@@ -69,13 +70,20 @@ def evaluate(model, rows, batch_size, pair_batch_size=16, prediction_sink=None):
             "brier_score": brier / examples, "loss": total_loss / examples, "examples": examples}
 
 
-def train_epoch(model, optimizer, rows, batch_size, max_pairs, accumulation_steps, log_every=100):
+def train_epoch(model, optimizer, rows, batch_size, max_pairs, accumulation_steps, log_every=100,
+                progress=None, checkpoint_every=0, checkpoint_callback=None):
     model.model.train()
     iterator = iter(batches(rows, batch_size, max_pairs))
-    total_loss = 0.0
-    examples = updates = 0
+    progress = progress or {}
+    total_loss = progress.get("total_loss", 0.0)
+    examples = progress.get("examples", 0)
+    updates = progress.get("updates", 0)
+    skipped = 0
     started = monotonic()
     while group := list(islice(iterator, accumulation_steps)):
+        if skipped < progress.get("updates", 0):
+            skipped += 1
+            continue
         # Weight by messages, not microbatches: pair budgets and the last batch
         # can produce unequal microbatch sizes.
         group_examples = sum(len(batch) for batch in group)
@@ -90,6 +98,8 @@ def train_epoch(model, optimizer, rows, batch_size, max_pairs, accumulation_step
         torch.nn.utils.clip_grad_norm_(model.model.parameters(), 1.0, error_if_nonfinite=True)
         optimizer.step()
         updates += 1
+        if checkpoint_callback and checkpoint_every and updates % checkpoint_every == 0:
+            checkpoint_callback({"updates": updates, "examples": examples, "total_loss": total_loss})
         if log_every and updates % log_every == 0:
             print(json.dumps({"updates": updates, "messages": examples,
                               "train_loss": total_loss / examples,
@@ -118,19 +128,28 @@ def main():
     parser.add_argument("--max-length", type=int, default=192)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default=None)
+    parser.add_argument("--checkpoint-dir", help="Private directory for automatic full-state recovery (SageMaker: /opt/ml/checkpoints)")
+    parser.add_argument("--checkpoint-every", type=int, default=50, help="Optimizer updates between recovery checkpoints")
     args = parser.parse_args()
     positive = (args.epochs, args.batch_size, args.max_pairs, args.gradient_accumulation_steps,
-                args.shuffle_buffer, args.eval_pair_batch_size, args.log_every, args.learning_rate)
+                args.shuffle_buffer, args.eval_pair_batch_size, args.log_every, args.learning_rate, args.checkpoint_every)
     if min(positive) <= 0:
         parser.error("Epochs, batch/buffer limits, accumulation steps, log interval, and learning rate must be positive")
     if not 16 <= args.max_length <= 512:
         parser.error("max-length must be between 16 and 512")
     output = Path(args.output)
-    if output.exists() and any(output.iterdir()):
+    recovery = load_recovery(args.checkpoint_dir)
+    if output.exists() and any(output.iterdir()) and recovery is None:
         parser.error("Output directory is not empty; choose a new --output to preserve existing checkpoints")
     set_seed(args.seed)
     torch.set_num_threads(min(8, os.cpu_count() or 1))
     counts = audit_splits(args.train, args.validation, args.max_pairs)
+    signature = {key: getattr(args, key) for key in (
+        "epochs", "batch_size", "max_pairs", "gradient_accumulation_steps", "gradient_checkpointing",
+        "shuffle_buffer", "learning_rate", "max_length", "seed")}
+    signature.update(train_sha256=file_digest(args.train), validation_sha256=file_digest(args.validation))
+    if recovery and recovery["signature"] != signature:
+        raise ValueError("Recovery data or training settings changed; use a new checkpoint directory")
     print(json.dumps({"dataset_counts": counts}), flush=True)
     model = ChoiceModel(args.model, args.device, args.max_length)
     print(json.dumps({"device": str(model.device), "max_length": model.max_length}), flush=True)
@@ -140,13 +159,35 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     history = []
     best = float("inf")
-    for epoch in range(args.epochs + 1):
+    best_weights = None
+    start_epoch, progress = 0, None
+    if recovery:
+        model.model.load_state_dict(recovery["model"])
+        optimizer.load_state_dict(recovery["optimizer"])
+        history, best, best_weights = recovery["history"], recovery["best"], recovery["best_weights"]
+        start_epoch, progress = recovery["epoch"], recovery["progress"]
+        restore_rng(recovery["rng"])
+        print(json.dumps({"resumed_epoch": start_epoch, "completed_updates": progress.get("updates", 0)}), flush=True)
+        del recovery
+
+    def checkpoint(epoch, progress):
+        if args.checkpoint_dir:
+            save_recovery(args.checkpoint_dir, {
+                "version": 1, "signature": signature, "epoch": epoch, "progress": progress,
+                "model": model.model.state_dict(), "optimizer": optimizer.state_dict(),
+                "rng": rng_state(), "history": history, "best": best, "best_weights": best_weights,
+            })
+
+    for epoch in range(start_epoch, args.epochs + 1):
         metrics = {"epoch": epoch}
         started = monotonic()
         if epoch:
             rows = buffered_shuffle(iter_data(args.train), args.shuffle_buffer, args.seed + epoch)
             metrics.update(train_epoch(model, optimizer, rows, args.batch_size, args.max_pairs,
-                                       args.gradient_accumulation_steps, args.log_every))
+                                       args.gradient_accumulation_steps, args.log_every,
+                                       progress=progress, checkpoint_every=args.checkpoint_every,
+                                       checkpoint_callback=lambda p: checkpoint(epoch, p)))
+            progress = None
         print(json.dumps({"epoch": epoch, "phase": "validation"}), flush=True)
         metrics["validation"] = evaluate(model, iter_data(args.validation), args.batch_size, args.eval_pair_batch_size)
         metrics["epoch_seconds"] = round(monotonic() - started, 2)
@@ -156,11 +197,19 @@ def main():
         # trained weights, even if a tiny smoke run does not improve validation.
         if epoch and metrics["validation"]["loss"] < best:
             best = metrics["validation"]["loss"]
+            best_weights = {k: v.detach().cpu().clone() for k, v in model.model.state_dict().items()}
             model.save(output)
+        checkpoint(epoch + 1, {})
         # Preserve metrics after every epoch, including the initial baseline.
         temporary = output / "training_metrics.json.tmp"
         temporary.write_text(json.dumps({"arguments": vars(args), "history": history}, indent=2))
         temporary.replace(output / "training_metrics.json")
+    # Restore the best trained model even when a Spot restart began in a new
+    # container, where the old /opt/ml/model directory is no longer present.
+    if best_weights is not None:
+        model.model.load_state_dict(best_weights)
+        model.save(output)
+        (output / "training_metrics.json").write_text(json.dumps({"arguments": vars(args), "history": history}, indent=2))
 
 
 if __name__ == "__main__":
