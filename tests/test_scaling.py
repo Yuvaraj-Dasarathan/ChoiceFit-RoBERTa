@@ -80,6 +80,26 @@ def test_accumulation_matches_message_weighted_updates():
         assert torch.allclose(expected, actual, atol=1e-6)
 
 
+def test_update_callback_can_stop_an_epoch_early():
+    class TinyModel:
+        device = torch.device("cpu")
+
+        def __init__(self):
+            self.model = torch.nn.Linear(1, 2)
+
+        def logits(self, rows):
+            return self.model(torch.tensor([[float(r["message"])] for r in rows]))
+
+    model = TinyModel()
+    optimizer = torch.optim.SGD(model.model.parameters(), lr=0.1)
+    result = train_epoch(model, optimizer, iter(row(str(index)) for index in range(8)),
+                         batch_size=1, max_pairs=2, accumulation_steps=1, log_every=0,
+                         update_callback=lambda record: False)
+    assert result["stopped_early"] is True
+    assert result["updates"] == 1
+    assert result["examples"] == 1
+
+
 def test_training_cli_saves_reloadable_checkpoint(tmp_path, monkeypatch):
     from tokenizers import Tokenizer
     from tokenizers.models import WordLevel
@@ -101,15 +121,21 @@ def test_training_cli_saves_reloadable_checkpoint(tmp_path, monkeypatch):
     validation.write_text(json.dumps(row("held out")) + "\n")
     output = tmp_path / "trained"
     checkpoints = tmp_path / "checkpoints"
+    convergence = tmp_path / "convergence.jsonl"
     monkeypatch.setattr("sys.argv", ["train", "--model", str(checkpoint), "--train", str(train),
                                     "--validation", str(validation), "--output", str(output),
                                     "--epochs", "1", "--batch-size", "2", "--max-pairs", "4",
                                     "--gradient-accumulation-steps", "2", "--gradient-checkpointing",
                                     "--max-length", "16", "--device", "cpu",
-                                    "--checkpoint-dir", str(checkpoints), "--checkpoint-every", "1"])
+                                    "--checkpoint-dir", str(checkpoints), "--checkpoint-every", "1",
+                                    "--convergence-jsonl", str(convergence), "--eval-every", "1"])
     main()
     metrics = json.loads((output / "training_metrics.json").read_text())
     assert metrics["history"][1]["updates"] == 2
+    trace = [json.loads(line) for line in convergence.read_text().splitlines()]
+    assert [event["event"] for event in trace].count("example") == 5
+    update = next(event for event in trace if event["event"] == "update")
+    assert {"update_loss", "gradient_norm_before_clip", "classifier_out_proj_bias_l2"} <= set(update)
     restored = ChoiceModel(output, device="cpu")
     result = evaluate(restored, iter_data(validation), batch_size=1, pair_batch_size=1)
     assert result["examples"] == 1

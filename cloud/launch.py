@@ -16,7 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 IMAGE_TAG = '2.9.0-gpu-py312-cu130-ubuntu22.04-sagemaker'
 
 
-def build_request(job_name, bucket, role, prefix, spot=False, max_run=900, max_wait=3600, epochs=1):
+def build_request(job_name, bucket, role, prefix, spot=False, max_run=900, max_wait=3600,
+                  training_config=None):
     region = 'us-east-1'
     location = f's3://{bucket}/{prefix}/{job_name}'
     channels = []
@@ -28,7 +29,8 @@ def build_request(job_name, bucket, role, prefix, spot=False, max_run=900, max_w
         'AlgorithmSpecification': {'TrainingImage': f'763104351884.dkr.ecr.{region}.amazonaws.com/pytorch-training:{IMAGE_TAG}',
                                    'TrainingInputMode': 'File'},
         'InputDataConfig': channels,
-        'OutputDataConfig': {'S3OutputPath': location + '/output/'},
+        # SageMaker appends <job-name>/output/model.tar.gz itself.
+        'OutputDataConfig': {'S3OutputPath': f's3://{bucket}/{prefix}/'},
         'ResourceConfig': {'InstanceType': 'ml.g4dn.xlarge', 'InstanceCount': 1, 'VolumeSizeInGB': 50},
         'StoppingCondition': {'MaxRuntimeInSeconds': max_run},
         'CheckpointConfig': {'S3Uri': location + '/checkpoints/', 'LocalPath': '/opt/ml/checkpoints'},
@@ -36,8 +38,8 @@ def build_request(job_name, bucket, role, prefix, spot=False, max_run=900, max_w
         'HyperParameters': {'sagemaker_program': json.dumps('entrypoint.py'),
                             'sagemaker_submit_directory': json.dumps(location + '/code/source.tar.gz'),
                             'sagemaker_region': json.dumps(region)},
-        'Environment': {'CHOICEFIT_CONFIG': json.dumps({
-            'epochs': epochs, 'batch-size': 1, 'max-pairs': 4, 'gradient-accumulation-steps': 4,
+        'Environment': {'CHOICEFIT_CONFIG': json.dumps(training_config or {
+            'epochs': 1, 'batch-size': 1, 'max-pairs': 4, 'gradient-accumulation-steps': 4,
             'eval-pair-batch-size': 2, 'gradient-checkpointing': True, 'max-length': 192,
             'checkpoint-every': 50, 'log-every': 25}), 'TOKENIZERS_PARALLELISM': 'false'},
     }
@@ -74,7 +76,7 @@ def package_code(destination):
         archive.add(ROOT / 'cloud/requirements.txt', arcname='requirements.txt')
         for path in sorted((ROOT / 'src').glob('*.py')):
             # Exclude standalone experiments and dataset preparation dependencies.
-            if path.name in {'basic-roberta.py', 'prepare_typed_decisions.py'}:
+            if path.name in {'basic-roberta.py', 'prepare_typed_decisions.py', 'prepare_full_typed_decisions.py'}:
                 continue
             archive.add(path, arcname='src/' + path.name)
 
@@ -84,22 +86,42 @@ def main():
     parser.add_argument('--bucket', default='yuvaraj-choicefit-training', help='Existing private S3 bucket in us-east-1')
     parser.add_argument('--role', default='arn:aws:iam::612242785639:role/SageMakerChoiceFit', help='SageMaker execution role ARN')
     parser.add_argument('--base-model', required=True, help='Local RoBERTa snapshot (weights + tokenizer)')
-    parser.add_argument('--data-dir', default='data/typed-smoke')
+    parser.add_argument('--data-dir', default='data/typed-full')
     parser.add_argument('--prefix', default='choicefit')
     parser.add_argument('--job-name', default='choicefit-pilot-' + datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S'))
     parser.add_argument('--spot', action='store_true')
-    parser.add_argument('--max-run', type=int, default=900)
-    parser.add_argument('--max-wait', type=int, default=3600)
-    parser.add_argument('--epochs', type=int, default=1)
+    parser.add_argument('--max-run', type=int, default=86400, help='Maximum billable training seconds')
+    parser.add_argument('--max-wait', type=int, default=172800, help='Spot wait plus run limit')
+    parser.add_argument('--epochs', type=int, default=3)
+    parser.add_argument('--learning-rate', type=float, default=1e-5)
+    parser.add_argument('--eval-every', type=int, default=10000, help='Optimizer updates between full validation passes')
+    parser.add_argument('--early-stopping-patience', type=int, default=5)
+    parser.add_argument('--early-stopping-min-delta', type=float, default=0.0001)
+    parser.add_argument('--early-stopping-min-validations', type=int, default=3)
+    parser.add_argument('--checkpoint-every', type=int, default=5000)
+    parser.add_argument('--log-every', type=int, default=10000)
     parser.add_argument('--launch', action='store_true', help='Upload and start ONE paid training job; otherwise dry run')
     args = parser.parse_args()
-    if not 60 <= args.max_run <= 7200 or args.max_wait < args.max_run or args.epochs < 1:
-        parser.error('Require 60–7200 seconds max-run, max-wait >= max-run, and positive epochs')
+    if not 60 <= args.max_run <= 604800 or args.max_wait < args.max_run or args.epochs < 1:
+        parser.error('Require 60–604800 seconds max-run, max-wait >= max-run, and positive epochs')
+    if min(args.learning_rate, args.eval_every, args.early_stopping_patience,
+           args.checkpoint_every, args.log_every) <= 0 or args.early_stopping_min_delta < 0 or args.early_stopping_min_validations < 0:
+        parser.error('Training intervals and learning rate must be positive; early-stopping deltas/minimum must be zero or positive')
     if not re.fullmatch(r'[a-zA-Z0-9](-*[a-zA-Z0-9])*', args.job_name) or len(args.job_name) > 63:
         parser.error('Invalid SageMaker job name')
     report = preflight(args.data_dir, args.base_model)
+    training_config = {
+        'epochs': args.epochs, 'batch-size': 1, 'max-pairs': 4, 'gradient-accumulation-steps': 4,
+        'eval-pair-batch-size': 16, 'gradient-checkpointing': True, 'max-length': 192,
+        'learning-rate': args.learning_rate, 'eval-every': args.eval_every,
+        'early-stopping-patience': args.early_stopping_patience,
+        'early-stopping-min-delta': args.early_stopping_min_delta,
+        'early-stopping-min-validations': args.early_stopping_min_validations,
+        'checkpoint-every': args.checkpoint_every, 'log-every': args.log_every,
+        'convergence-jsonl': '/opt/ml/model/convergence.jsonl',
+    }
     request = build_request(args.job_name, args.bucket, args.role, args.prefix.strip('/'),
-                            args.spot, args.max_run, args.max_wait, args.epochs)
+                            args.spot, args.max_run, args.max_wait, training_config)
     # Botocore validates request shape without credentials or AWS requests.
     import botocore.session
     from botocore.validate import validate_parameters

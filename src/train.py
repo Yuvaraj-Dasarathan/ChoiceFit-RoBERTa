@@ -28,6 +28,44 @@ def choice_loss(logits, probabilities):
     return -(probabilities * log_probabilities).sum(-1)
 
 
+def classification_head_stats(model):
+    """Small, useful summaries of the trainable scalar scorer.
+
+    Logging every RoBERTa parameter would mean serialising roughly 125 million
+    values at every update.  These norms show whether the newly-created head is
+    changing without turning a learning trace into an enormous opaque file.
+    """
+    head = getattr(model.model, "classifier", None)
+    if head is None:
+        return {}
+    values = {}
+    for name, parameter in head.named_parameters():
+        value = parameter.detach().float().norm().cpu().item()
+        values[f"classifier_{name.replace('.', '_')}_l2"] = value
+    return values
+
+
+def trace_examples(sink, epoch, next_update, batch, logits, probabilities, losses):
+    """Write one compact, pre-update learning observation for each message."""
+    predicted_probabilities = logits.detach().softmax(-1).cpu().tolist()
+    scores = logits.detach().cpu().tolist()
+    target_probabilities = probabilities.detach().cpu().tolist()
+    per_example_losses = losses.detach().cpu().tolist()
+    for row, scores_for_row, predicted_for_row, target_for_row, loss in zip(
+            batch, scores, predicted_probabilities, target_probabilities, per_example_losses):
+        keys = list(row["choices"])
+        size = len(keys)
+        scores_for_row = scores_for_row[:size]
+        predicted_for_row = predicted_for_row[:size]
+        target_for_row = target_for_row[:size]
+        predicted_index = max(range(size), key=predicted_for_row.__getitem__)
+        sink({"event": "example", "epoch": epoch, "next_update": next_update,
+              "choice_ids": keys, "target": dict(zip(keys, target_for_row)),
+              "scores": dict(zip(keys, scores_for_row)),
+              "probabilities": dict(zip(keys, predicted_for_row)),
+              "predicted_choice": keys[predicted_index], "loss": loss})
+
+
 @torch.inference_mode()
 def evaluate(model, rows, batch_size, pair_batch_size=16, prediction_sink=None):
     model.model.eval()
@@ -71,7 +109,8 @@ def evaluate(model, rows, batch_size, pair_batch_size=16, prediction_sink=None):
 
 
 def train_epoch(model, optimizer, rows, batch_size, max_pairs, accumulation_steps, log_every=100,
-                progress=None, checkpoint_every=0, checkpoint_callback=None):
+                progress=None, checkpoint_every=0, checkpoint_callback=None, epoch=None,
+                trace_sink=None, update_callback=None):
     model.model.train()
     iterator = iter(batches(rows, batch_size, max_pairs))
     progress = progress or {}
@@ -88,14 +127,22 @@ def train_epoch(model, optimizer, rows, batch_size, max_pairs, accumulation_step
         # can produce unequal microbatch sizes.
         group_examples = sum(len(batch) for batch in group)
         optimizer.zero_grad(set_to_none=True)
+        group_loss = 0.0
         for batch in group:
-            loss_sum = choice_loss(model.logits(batch), targets(batch, model.device)).sum()
+            logits = model.logits(batch)
+            probabilities = targets(batch, model.device)
+            losses = choice_loss(logits, probabilities)
+            loss_sum = losses.sum()
             if not torch.isfinite(loss_sum):
                 raise ValueError("Non-finite training loss; stopping before optimizer update")
+            if trace_sink is not None:
+                trace_examples(trace_sink, epoch, updates + 1, batch, logits, probabilities, losses)
             (loss_sum / group_examples).backward()
             total_loss += loss_sum.detach().item()
+            group_loss += loss_sum.detach().item()
             examples += len(batch)
-        torch.nn.utils.clip_grad_norm_(model.model.parameters(), 1.0, error_if_nonfinite=True)
+        gradient_norm = torch.nn.utils.clip_grad_norm_(
+            model.model.parameters(), 1.0, error_if_nonfinite=True).detach().cpu().item()
         optimizer.step()
         updates += 1
         if checkpoint_callback and checkpoint_every and updates % checkpoint_every == 0:
@@ -104,6 +151,17 @@ def train_epoch(model, optimizer, rows, batch_size, max_pairs, accumulation_step
             print(json.dumps({"updates": updates, "messages": examples,
                               "train_loss": total_loss / examples,
                               "elapsed_seconds": round(monotonic() - started, 1)}), flush=True)
+        if update_callback is not None:
+            keep_training = update_callback({
+                "event": "update", "epoch": epoch, "update": updates,
+                "messages_seen": examples, "update_loss": group_loss / group_examples,
+                "mean_train_loss": total_loss / examples,
+                "learning_rate": optimizer.param_groups[0]["lr"],
+                "gradient_norm_before_clip": gradient_norm,
+                **classification_head_stats(model)})
+            if keep_training is False:
+                return {"train_loss": total_loss / examples, "examples": examples, "updates": updates,
+                        "train_seconds": round(monotonic() - started, 2), "stopped_early": True}
     if not examples:
         raise ValueError("Training dataset is empty")
     return {"train_loss": total_loss / examples, "examples": examples, "updates": updates,
@@ -124,17 +182,31 @@ def main():
     parser.add_argument("--shuffle-buffer", type=int, default=10000, help="Maximum buffered training records")
     parser.add_argument("--eval-pair-batch-size", type=int, default=16)
     parser.add_argument("--log-every", type=int, default=100, help="Optimizer updates between progress reports")
-    parser.add_argument("--learning-rate", type=float, default=2e-5)
+    parser.add_argument("--learning-rate", type=float, default=1e-5)
     parser.add_argument("--max-length", type=int, default=192)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default=None)
     parser.add_argument("--checkpoint-dir", help="Private directory for automatic full-state recovery (SageMaker: /opt/ml/checkpoints)")
     parser.add_argument("--checkpoint-every", type=int, default=50, help="Optimizer updates between recovery checkpoints")
+    parser.add_argument("--convergence-jsonl", help="Write per-example and per-update learning observations here")
+    parser.add_argument("--eval-every", type=int, default=0,
+                        help="Run validation every N optimizer updates (0 means only at epoch end)")
+    parser.add_argument("--early-stopping-patience", type=int, default=0,
+                        help="Stop after N validation checks without a lower loss (0 disables it)")
+    parser.add_argument("--early-stopping-min-delta", type=float, default=0.0,
+                        help="Minimum validation-loss decrease that counts as an improvement")
+    parser.add_argument("--early-stopping-min-validations", type=int, default=0,
+                        help="Do not early-stop until this many post-training validation checks complete")
     args = parser.parse_args()
     positive = (args.epochs, args.batch_size, args.max_pairs, args.gradient_accumulation_steps,
                 args.shuffle_buffer, args.eval_pair_batch_size, args.log_every, args.learning_rate, args.checkpoint_every)
     if min(positive) <= 0:
         parser.error("Epochs, batch/buffer limits, accumulation steps, log interval, and learning rate must be positive")
+    if args.eval_every < 0:
+        parser.error("eval-every must be zero or positive")
+    if (args.early_stopping_patience < 0 or args.early_stopping_min_delta < 0 or
+            args.early_stopping_min_validations < 0):
+        parser.error("Early-stopping values must be zero or positive")
     if not 16 <= args.max_length <= 512:
         parser.error("max-length must be between 16 and 512")
     output = Path(args.output)
@@ -146,7 +218,8 @@ def main():
     counts = audit_splits(args.train, args.validation, args.max_pairs)
     signature = {key: getattr(args, key) for key in (
         "epochs", "batch_size", "max_pairs", "gradient_accumulation_steps", "gradient_checkpointing",
-        "shuffle_buffer", "learning_rate", "max_length", "seed")}
+        "shuffle_buffer", "learning_rate", "max_length", "seed", "early_stopping_patience",
+        "early_stopping_min_delta", "early_stopping_min_validations")}
     signature.update(train_sha256=file_digest(args.train), validation_sha256=file_digest(args.validation))
     if recovery and recovery["signature"] != signature:
         raise ValueError("Recovery data or training settings changed; use a new checkpoint directory")
@@ -157,14 +230,32 @@ def main():
         model.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     optimizer = torch.optim.AdamW(model.model.parameters(), lr=args.learning_rate, weight_decay=0.01)
     output.mkdir(parents=True, exist_ok=True)
+    trace_file = None
+    if args.convergence_jsonl:
+        trace_path = Path(args.convergence_jsonl)
+        trace_path.parent.mkdir(parents=True, exist_ok=True)
+        trace_file = trace_path.open("a" if recovery else "x")
+
+        def write_trace(record):
+            trace_file.write(json.dumps(record) + "\n")
+            trace_file.flush()
+        if not recovery:
+            write_trace({"event": "run", "arguments": vars(args), "dataset_counts": counts,
+                         "meaning": "example events are observed before their optimizer update"})
+    else:
+        write_trace = None
     history = []
     best = float("inf")
     best_weights = None
+    validations_without_improvement = 0
+    validation_checks = 0
     start_epoch, progress = 0, None
     if recovery:
         model.model.load_state_dict(recovery["model"])
         optimizer.load_state_dict(recovery["optimizer"])
         history, best, best_weights = recovery["history"], recovery["best"], recovery["best_weights"]
+        validations_without_improvement = recovery.get("validations_without_improvement", 0)
+        validation_checks = recovery.get("validation_checks", 0)
         start_epoch, progress = recovery["epoch"], recovery["progress"]
         restore_rng(recovery["rng"])
         print(json.dumps({"resumed_epoch": start_epoch, "completed_updates": progress.get("updates", 0)}), flush=True)
@@ -176,40 +267,108 @@ def main():
                 "version": 1, "signature": signature, "epoch": epoch, "progress": progress,
                 "model": model.model.state_dict(), "optimizer": optimizer.state_dict(),
                 "rng": rng_state(), "history": history, "best": best, "best_weights": best_weights,
+                "validations_without_improvement": validations_without_improvement,
+                "validation_checks": validation_checks,
             })
+
+    def assess_validation(epoch, validation):
+        """Keep the best trained weights and decide whether to stop this run."""
+        nonlocal best, best_weights, validations_without_improvement, validation_checks
+        if not epoch:
+            return False, False
+        validation_checks += 1
+        improved = validation["loss"] < best - args.early_stopping_min_delta
+        if improved:
+            best = validation["loss"]
+            best_weights = {key: value.detach().cpu().clone()
+                            for key, value in model.model.state_dict().items()}
+            # Save immediately: the best value can occur between epoch ends.
+            model.save(output)
+            validations_without_improvement = 0
+        else:
+            validations_without_improvement += 1
+        should_stop = (args.early_stopping_patience > 0 and
+                       validation_checks >= args.early_stopping_min_validations and
+                       validations_without_improvement >= args.early_stopping_patience)
+        return improved, should_stop
 
     for epoch in range(start_epoch, args.epochs + 1):
         metrics = {"epoch": epoch}
         started = monotonic()
+        stopped_early = False
         if epoch:
             rows = buffered_shuffle(iter_data(args.train), args.shuffle_buffer, args.seed + epoch)
+            def on_update(record):
+                if write_trace is not None:
+                    write_trace(record)
+                if args.eval_every and record["update"] % args.eval_every == 0:
+                    validation = evaluate(model, iter_data(args.validation), args.batch_size,
+                                          args.eval_pair_batch_size)
+                    model.model.train()
+                    improved, should_stop = assess_validation(epoch, validation)
+                    event = {"event": "validation", "epoch": epoch,
+                             "update": record["update"], "validation": validation,
+                             "is_best": improved,
+                             "validation_check": validation_checks,
+                             "validations_without_improvement": validations_without_improvement}
+                    print(json.dumps({
+                        "event": "validation", "epoch": epoch, "update": record["update"],
+                        "rows_seen": record["messages_seen"],
+                        "validation_loss": validation["loss"],
+                        "accuracy": validation["accuracy"], "is_best": improved,
+                        "validation_check": validation_checks,
+                        "validations_without_improvement": validations_without_improvement}), flush=True)
+                    if write_trace is not None:
+                        write_trace(event)
+                    if should_stop:
+                        print(json.dumps({"event": "early_stop", "epoch": epoch,
+                                          "update": record["update"],
+                                          "patience": args.early_stopping_patience}), flush=True)
+                        return False
             metrics.update(train_epoch(model, optimizer, rows, args.batch_size, args.max_pairs,
                                        args.gradient_accumulation_steps, args.log_every,
                                        progress=progress, checkpoint_every=args.checkpoint_every,
-                                       checkpoint_callback=lambda p: checkpoint(epoch, p)))
+                                       checkpoint_callback=lambda p: checkpoint(epoch, p), epoch=epoch,
+                                       trace_sink=write_trace, update_callback=on_update))
             progress = None
+            stopped_early = metrics.get("stopped_early", False)
         print(json.dumps({"epoch": epoch, "phase": "validation"}), flush=True)
         metrics["validation"] = evaluate(model, iter_data(args.validation), args.batch_size, args.eval_pair_batch_size)
         metrics["epoch_seconds"] = round(monotonic() - started, 2)
+        # If the last update already ran validation, avoid counting that exact
+        # result twice for early stopping. Epoch-end validation remains in the
+        # history so each epoch has one simple summary row.
+        duplicate_interval_validation = (epoch and args.eval_every and
+                                         metrics.get("updates", 0) % args.eval_every == 0)
+        improved = False
+        if epoch and not duplicate_interval_validation:
+            improved, stopped_after_epoch = assess_validation(epoch, metrics["validation"])
+            stopped_early = stopped_early or stopped_after_epoch
+        metrics["is_best"] = improved
+        metrics["validations_without_improvement"] = validations_without_improvement
         history.append(metrics)
         print(json.dumps(metrics), flush=True)
-        # Baseline is diagnostic only. The inference artifact must contain
-        # trained weights, even if a tiny smoke run does not improve validation.
-        if epoch and metrics["validation"]["loss"] < best:
-            best = metrics["validation"]["loss"]
-            best_weights = {k: v.detach().cpu().clone() for k, v in model.model.state_dict().items()}
-            model.save(output)
-        checkpoint(epoch + 1, {})
+        if write_trace is not None:
+            write_trace({"event": "validation", "epoch": epoch,
+                         "update": metrics.get("updates", 0), "validation": metrics["validation"],
+                         "end_of_epoch": True, "is_best": improved,
+                         "validations_without_improvement": validations_without_improvement})
+        if not stopped_early:
+            checkpoint(epoch + 1, {})
         # Preserve metrics after every epoch, including the initial baseline.
         temporary = output / "training_metrics.json.tmp"
         temporary.write_text(json.dumps({"arguments": vars(args), "history": history}, indent=2))
         temporary.replace(output / "training_metrics.json")
+        if stopped_early:
+            break
     # Restore the best trained model even when a Spot restart began in a new
     # container, where the old /opt/ml/model directory is no longer present.
     if best_weights is not None:
         model.model.load_state_dict(best_weights)
         model.save(output)
         (output / "training_metrics.json").write_text(json.dumps({"arguments": vars(args), "history": history}, indent=2))
+    if trace_file is not None:
+        trace_file.close()
 
 
 if __name__ == "__main__":
