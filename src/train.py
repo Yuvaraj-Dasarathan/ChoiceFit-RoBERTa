@@ -7,7 +7,7 @@ from pathlib import Path
 from time import monotonic
 
 import torch
-from transformers import set_seed
+from transformers import get_linear_schedule_with_warmup, set_seed
 
 from .data import audit_splits, batches, buffered_shuffle
 from .model import ChoiceModel, iter_data
@@ -110,7 +110,7 @@ def evaluate(model, rows, batch_size, pair_batch_size=16, prediction_sink=None):
 
 def train_epoch(model, optimizer, rows, batch_size, max_pairs, accumulation_steps, log_every=100,
                 progress=None, checkpoint_every=0, checkpoint_callback=None, epoch=None,
-                trace_sink=None, update_callback=None):
+                trace_sink=None, update_callback=None, scheduler=None, scaler=None, precision="none"):
     model.model.train()
     iterator = iter(batches(rows, batch_size, max_pairs))
     progress = progress or {}
@@ -129,21 +129,36 @@ def train_epoch(model, optimizer, rows, batch_size, max_pairs, accumulation_step
         optimizer.zero_grad(set_to_none=True)
         group_loss = 0.0
         for batch in group:
-            logits = model.logits(batch)
-            probabilities = targets(batch, model.device)
-            losses = choice_loss(logits, probabilities)
-            loss_sum = losses.sum()
+            enabled = precision != "none"
+            dtype = torch.bfloat16 if precision == "bf16" else torch.float16
+            device_type = torch.device(model.device).type
+            with torch.autocast(device_type=device_type, dtype=dtype, enabled=enabled):
+                logits = model.logits(batch)
+                probabilities = targets(batch, model.device)
+                losses = choice_loss(logits, probabilities)
+                loss_sum = losses.sum()
             if not torch.isfinite(loss_sum):
                 raise ValueError("Non-finite training loss; stopping before optimizer update")
             if trace_sink is not None:
                 trace_examples(trace_sink, epoch, updates + 1, batch, logits, probabilities, losses)
-            (loss_sum / group_examples).backward()
+            if scaler is not None:
+                scaler.scale(loss_sum / group_examples).backward()
+            else:
+                (loss_sum / group_examples).backward()
             total_loss += loss_sum.detach().item()
             group_loss += loss_sum.detach().item()
             examples += len(batch)
+        if scaler is not None:
+            scaler.unscale_(optimizer)
         gradient_norm = torch.nn.utils.clip_grad_norm_(
             model.model.parameters(), 1.0, error_if_nonfinite=True).detach().cpu().item()
-        optimizer.step()
+        if scaler is not None:
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            optimizer.step()
+        if scheduler is not None:
+            scheduler.step()
         updates += 1
         if checkpoint_callback and checkpoint_every and updates % checkpoint_every == 0:
             checkpoint_callback({"updates": updates, "examples": examples, "total_loss": total_loss})
@@ -183,6 +198,8 @@ def main():
     parser.add_argument("--eval-pair-batch-size", type=int, default=16)
     parser.add_argument("--log-every", type=int, default=100, help="Optimizer updates between progress reports")
     parser.add_argument("--learning-rate", type=float, default=1e-5)
+    parser.add_argument("--warmup-ratio", type=float, default=0.0)
+    parser.add_argument("--precision", choices=("none", "fp16", "bf16"), default="none")
     parser.add_argument("--max-length", type=int, default=192)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default=None)
@@ -209,6 +226,10 @@ def main():
         parser.error("Early-stopping values must be zero or positive")
     if not 16 <= args.max_length <= 512:
         parser.error("max-length must be between 16 and 512")
+    if not 0 <= args.warmup_ratio < 1:
+        parser.error("warmup-ratio must be at least zero and below one")
+    if args.precision != "none" and not torch.cuda.is_available():
+        parser.error("fp16/bf16 precision requires CUDA")
     output = Path(args.output)
     recovery = load_recovery(args.checkpoint_dir)
     if output.exists() and any(output.iterdir()) and recovery is None:
@@ -219,16 +240,24 @@ def main():
     signature = {key: getattr(args, key) for key in (
         "epochs", "batch_size", "max_pairs", "gradient_accumulation_steps", "gradient_checkpointing",
         "shuffle_buffer", "learning_rate", "max_length", "seed", "early_stopping_patience",
-        "early_stopping_min_delta", "early_stopping_min_validations")}
+        "early_stopping_min_delta", "early_stopping_min_validations", "warmup_ratio", "precision")}
     signature.update(train_sha256=file_digest(args.train), validation_sha256=file_digest(args.validation))
     if recovery and recovery["signature"] != signature:
         raise ValueError("Recovery data or training settings changed; use a new checkpoint directory")
     print(json.dumps({"dataset_counts": counts}), flush=True)
     model = ChoiceModel(args.model, args.device, args.max_length)
-    print(json.dumps({"device": str(model.device), "max_length": model.max_length}), flush=True)
+    print(json.dumps({"device": str(model.device), "max_length": model.max_length,
+                      "precision": args.precision, "warmup_ratio": args.warmup_ratio}), flush=True)
     if args.gradient_checkpointing:
         model.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     optimizer = torch.optim.AdamW(model.model.parameters(), lr=args.learning_rate, weight_decay=0.01)
+    estimated_updates = max(1, (counts["train"] * args.epochs +
+                                args.batch_size * args.gradient_accumulation_steps - 1) //
+                               (args.batch_size * args.gradient_accumulation_steps))
+    scheduler = (get_linear_schedule_with_warmup(
+        optimizer, num_warmup_steps=int(estimated_updates * args.warmup_ratio),
+        num_training_steps=estimated_updates) if args.warmup_ratio else None)
+    scaler = torch.amp.GradScaler("cuda", enabled=args.precision == "fp16") if args.precision != "none" else None
     output.mkdir(parents=True, exist_ok=True)
     trace_file = None
     if args.convergence_jsonl:
@@ -253,6 +282,8 @@ def main():
     if recovery:
         model.model.load_state_dict(recovery["model"])
         optimizer.load_state_dict(recovery["optimizer"])
+        if scheduler is not None and recovery.get("scheduler") is not None:
+            scheduler.load_state_dict(recovery["scheduler"])
         history, best, best_weights = recovery["history"], recovery["best"], recovery["best_weights"]
         validations_without_improvement = recovery.get("validations_without_improvement", 0)
         validation_checks = recovery.get("validation_checks", 0)
@@ -266,6 +297,7 @@ def main():
             save_recovery(args.checkpoint_dir, {
                 "version": 1, "signature": signature, "epoch": epoch, "progress": progress,
                 "model": model.model.state_dict(), "optimizer": optimizer.state_dict(),
+                "scheduler": scheduler.state_dict() if scheduler is not None else None,
                 "rng": rng_state(), "history": history, "best": best, "best_weights": best_weights,
                 "validations_without_improvement": validations_without_improvement,
                 "validation_checks": validation_checks,
@@ -329,7 +361,8 @@ def main():
                                        args.gradient_accumulation_steps, args.log_every,
                                        progress=progress, checkpoint_every=args.checkpoint_every,
                                        checkpoint_callback=lambda p: checkpoint(epoch, p), epoch=epoch,
-                                       trace_sink=write_trace, update_callback=on_update))
+                                       trace_sink=write_trace, update_callback=on_update,
+                                       scheduler=scheduler, scaler=scaler, precision=args.precision))
             progress = None
             stopped_early = metrics.get("stopped_early", False)
         print(json.dumps({"epoch": epoch, "phase": "validation"}), flush=True)

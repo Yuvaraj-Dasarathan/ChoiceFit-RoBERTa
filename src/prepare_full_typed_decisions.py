@@ -54,7 +54,10 @@ def write_split(rows, destination, tokenizer, limit, max_choices, max_length,
                 continue
             if limit and selected + len(candidates) > limit:
                 stats["group_exceeds_limit"] += len(candidates)
-                continue
+                # A bounded pilot should finish promptly. Stopping at this
+                # complete group keeps the split just below its requested cap
+                # without scanning the rest of a million-row source split.
+                break
             for row in candidates:
                 output.write(json.dumps(row) + "\n")
                 selected += 1

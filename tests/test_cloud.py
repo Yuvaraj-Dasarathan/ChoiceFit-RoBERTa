@@ -1,3 +1,4 @@
+import json
 import tarfile
 import pytest
 
@@ -18,6 +19,9 @@ def test_request_schema_and_cost_controls():
     assert request['CheckpointConfig']['LocalPath'] == '/opt/ml/checkpoints'
     assert request['EnableManagedSpotTraining'] is True
     assert 'MaxWaitTimeInSeconds' not in build_request('test', 'bucket', role, 'prefix')['StoppingCondition']
+    reused = build_request('new-job', 'bucket', role, 'prefix', input_job_name='old-job')
+    assert reused['InputDataConfig'][0]['DataSource']['S3DataSource']['S3Uri'].endswith('/old-job/train/')
+    assert json.loads(reused['HyperParameters']['sagemaker_submit_directory']).endswith('/old-job/code/source.tar.gz')
 
 
 def test_code_archive_excludes_data_and_environments(tmp_path):
