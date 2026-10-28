@@ -1,0 +1,33 @@
+[
+  {
+    "message": "Capital of france is paris",
+    "question": "What is the capital of France?",
+    "choices": {
+      "option1": "New Delhi",
+      "option2": "France",
+      "option3": "London"
+    },
+    "expected": "option2"
+  },
+  {
+    "message": "I was charged twice for the same coffee this morning.",
+    "question": "Which category best describes what the customer wants?",
+    "choices": {
+      "billing_dispute": "Report an incorrect or duplicate charge",
+      "reset_password": "Reset a forgotten password",
+      "open_account": "Open a new bank account"
+    },
+    "expected": "billing_dispute"
+  },
+  {
+    "message": "The movie was a total waste of two hours, but the soundtrack was lovely.",
+    "question": "What is the overall sentiment?",
+    "choices": {
+      "positive": "The message is mostly positive",
+      "negative": "The message is mostly negative",
+      "neutral": "The message is neither positive nor negative",
+      "mixed": "The message contains both positive and negative views"
+    },
+    "expected": "mixed"
+  }
+]
