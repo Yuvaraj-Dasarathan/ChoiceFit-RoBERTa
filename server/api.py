@@ -20,7 +20,17 @@ ROOT = Path(__file__).resolve().parent.parent
 LOCAL_MODEL = ROOT / "artifacts/sagemaker/choicefit-l4-full-b8-001"
 MODEL_ID = os.getenv("CHOICEFIT_MODEL", str(LOCAL_MODEL))
 ALLOWED_ORIGINS = [o for o in os.getenv("CHOICEFIT_ORIGINS", "").split(",") if o]
-RATE_LIMIT = int(os.getenv("CHOICEFIT_RATE_PER_MIN", "20"))  # per client IP
+
+def _int(name: str, default: int) -> int:
+    return int(os.getenv(name, str(default)))
+
+
+IP_PER_MIN = _int("CHOICEFIT_RATE_PER_MIN", 20)       # per client IP
+IP_PER_DAY = _int("CHOICEFIT_IP_PER_DAY", 200)        # per client IP
+GLOBAL_PER_MIN = _int("CHOICEFIT_GLOBAL_PER_MIN", 60)  # all clients together
+GLOBAL_PER_DAY = _int("CHOICEFIT_GLOBAL_PER_DAY", 2000)
+MAX_WAITING = _int("CHOICEFIT_MAX_QUEUE", 5)          # requests running or waiting
+DISABLED = os.getenv("CHOICEFIT_DISABLED") == "1"     # kill switch
 
 MAX_OPTIONS = 8
 MAX_CHARS = 2000
@@ -37,7 +47,12 @@ if ALLOWED_ORIGINS:
 
 _model = None
 _lock = threading.Lock()  # one inference at a time keeps CPU/memory bounded
-_hits = defaultdict(deque)
+_state = threading.Lock()  # guards the counters below
+_ip_min = defaultdict(deque)
+_ip_day = defaultdict(deque)
+_global_min = deque()
+_global_day = deque()
+_in_flight = 0
 
 
 class PredictRequest(BaseModel):
@@ -47,21 +62,51 @@ class PredictRequest(BaseModel):
 
 
 def client_ip(request: Request) -> str:
-    # The last X-Forwarded-For entry is the one ngrok itself observed
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[-1].strip()
+    # ngrok appends the real client IP last; earlier entries can be spoofed by the caller.
+    # Headers can arrive as several lines, so look at every line, not just the first.
+    entries = [p.strip() for line in request.headers.getlist("x-forwarded-for") for p in line.split(",")]
+    entries = [e for e in entries if e]
+    if entries:
+        return entries[-1]
     return request.client.host if request.client else "unknown"
 
 
-def check_rate(ip: str) -> None:
-    now = time.monotonic()
-    window = _hits[ip]
-    while window and now - window[0] > 60:
+def _prune(window: deque, now: float, span: float) -> None:
+    while window and now - window[0] > span:
         window.popleft()
-    if len(window) >= RATE_LIMIT:
-        raise HTTPException(429, f"Rate limit: {RATE_LIMIT} requests per minute.")
-    window.append(now)
+
+
+def admit(ip: str) -> None:
+    """Raise 429/503 if a limit is hit; otherwise count the request and reserve a queue slot."""
+    global _in_flight
+    now = time.monotonic()
+    with _state:
+        if DISABLED:
+            raise HTTPException(503, "The demo is switched off.")
+        for window, span, limit, msg in (
+            (_ip_min[ip], 60, IP_PER_MIN, f"Too many requests: {IP_PER_MIN} per minute per visitor."),
+            (_ip_day[ip], 86400, IP_PER_DAY, f"Daily limit reached: {IP_PER_DAY} requests per visitor."),
+            (_global_min, 60, GLOBAL_PER_MIN, "The demo is busy. Please try again in a minute."),
+            (_global_day, 86400, GLOBAL_PER_DAY, "The demo reached its daily limit. Please try again tomorrow."),
+        ):
+            _prune(window, now, span)
+            if len(window) >= limit:
+                raise HTTPException(429, msg)
+        if _in_flight >= MAX_WAITING:
+            raise HTTPException(503, "The demo is busy. Please try again in a few seconds.")
+        for window in (_ip_min[ip], _ip_day[ip], _global_min, _global_day):
+            window.append(now)
+        _in_flight += 1
+        if len(_ip_day) > 5000:  # drop idle visitors so memory stays bounded
+            for key in [k for k, w in _ip_day.items() if not w or now - w[-1] > 86400]:
+                _ip_day.pop(key, None)
+                _ip_min.pop(key, None)
+
+
+def release() -> None:
+    global _in_flight
+    with _state:
+        _in_flight -= 1
 
 
 @app.get("/health")
@@ -72,7 +117,6 @@ def health():
 @app.post("/predict")
 def predict(body: PredictRequest, request: Request):
     global _model
-    check_rate(client_ip(request))
     options = [o.strip() for o in body.options]
     if any(not o for o in options):
         raise HTTPException(422, "Options must not be empty.")
@@ -82,10 +126,14 @@ def predict(body: PredictRequest, request: Request):
         raise HTTPException(422, "Options must be different from each other.")
     question = body.question.strip() or DEFAULT_QUESTION
     choices = {f"option_{i}": text for i, text in enumerate(options)}
-    with _lock:
-        if _model is None:
-            _model = ChoiceModel(MODEL_ID, device="cpu")
-        result = _model.predict(body.message.strip(), choices, question, pair_batch_size=8)
+    admit(client_ip(request))
+    try:
+        with _lock:
+            if _model is None:
+                _model = ChoiceModel(MODEL_ID, device="cpu")
+            result = _model.predict(body.message.strip(), choices, question, pair_batch_size=8)
+    finally:
+        release()
     probabilities = [result["probabilities"][f"option_{i}"] for i in range(len(options))]
     best = max(range(len(options)), key=probabilities.__getitem__)
     return {

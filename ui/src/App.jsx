@@ -91,14 +91,11 @@ export default function App() {
   const [online, setOnline] = useState(true);
   const [active, setActive] = useState(0);
 
+  // One health check when the page opens; after that, a failed submit shows the error.
   useEffect(() => {
-    const check = () =>
-      fetch(API + "/health", { headers: HEADERS })
-        .then((r) => setOnline(r.ok))
-        .catch(() => setOnline(false));
-    check();
-    const id = setInterval(check, 30000);
-    return () => clearInterval(id);
+    fetch(API + "/health", { headers: HEADERS })
+      .then((r) => setOnline(r.ok))
+      .catch(() => setOnline(false));
   }, []);
 
   const loadExample = (i) => {
@@ -133,7 +130,9 @@ export default function App() {
         throw new Error(detail);
       }
       setResult(data);
+      setOnline(true);
     } catch (e) {
+      if (e instanceof TypeError) setOnline(false);
       setError(e instanceof TypeError ? "The server is temporarily down. Please try again after some time." : e.message);
     } finally {
       setLoading(false);

@@ -322,7 +322,7 @@ cd /Users/yuvaraj/Desktop/AI/choicefit_roberta
 scripts/start_demo.sh
 ```
 
-This starts the API (CORS allowed only for `https://yuvarajd2588.github.io`), starts `ngrok http 8000`, keeps the Mac awake, and prints the public URL. Press Ctrl+C to stop both. The page checks `/health` every 30 seconds, so the banner disappears on its own once the server is up.
+This starts the API (CORS allowed only for `https://yuvarajd2588.github.io`), starts `ngrok http 8000`, keeps the Mac awake, and prints the public URL. Press Ctrl+C to stop both. The page checks `/health` once when it opens (to show the "temporarily down" banner); after that only a failed submit reports an error, so refresh the page after starting the server.
 
 Test it locally at `http://127.0.0.1:8000` (the API also serves the built UI from `web/` if it exists).
 
@@ -332,7 +332,10 @@ Test it locally at `http://127.0.0.1:8000` (the API also serves the built UI fro
 | --- | --- |
 | Public API address used by the hosted page | `REMOTE_API_URL` in `ui/src/config.js` (your ngrok dev domain; it does not change on restart) |
 | Allowed web origin | `CHOICEFIT_ORIGINS` env var (default in `scripts/start_demo.sh`) |
-| Rate limit per IP | `CHOICEFIT_RATE_PER_MIN` (default 20) |
+| Per-visitor limits | `CHOICEFIT_RATE_PER_MIN` (20) and `CHOICEFIT_IP_PER_DAY` (200) |
+| All visitors together | `CHOICEFIT_GLOBAL_PER_MIN` (60) and `CHOICEFIT_GLOBAL_PER_DAY` (2000), the last protects the ngrok monthly quota |
+| Queue limit | `CHOICEFIT_MAX_QUEUE` (5): extra requests get 503 instead of waiting |
+| Kill switch | `CHOICEFIT_DISABLED=1` makes `/predict` return 503 |
 | Input limits | `server/api.py`: 2-8 options, 2000-char message, 300-char options |
 
 Changing `ui/` or `config.js` and pushing redeploys the page (about a minute). Build locally with `cd ui && npm install && npm run build` (output goes to `web/`, git-ignored). Node 14 works with the pinned Vite 2.
@@ -340,5 +343,5 @@ Changing `ui/` or `config.js` and pushing redeploys the page (about a minute). B
 ### Limits and shutdown
 
 - ngrok free plan: 1 GB and 20,000 requests per month.
-- Anyone with the URL can call the API, within the rate limit. Do not run it with AWS or TypeSafe keys in your environment.
+- Anyone with the URL can call the API, within the limits above. The visitor IP is the last `X-Forwarded-For` entry, because ngrok appends the real address and callers can fake earlier ones. Limits reset when the server restarts. Do not run it with AWS or TypeSafe keys in your environment.
 - To end the demo: stop the script, then delete or unpublish the Pages site (Settings > Pages) or revert `config.js`.
