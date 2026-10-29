@@ -277,3 +277,32 @@ scripts/run_eval.sh data/eval/banking77-8way-500.jsonl banking77-8way-500
 ```
 
 For any other dataset, write a converter that produces rows with `message`, `question`, `choices` (`{"option_0": "description", ...}`), `target` (`{"option_0": 1.0, "option_1": 0.0, ...}`) and a unique `id`; `src/prepare_intent_eval.py` is a short template.
+
+## 14. Public demo on Hugging Face (free)
+
+The demo is a Gradio app, [demo/app.py](../demo/app.py), hosted as a Hugging Face Space. The Space loads the model from a Hub model repo and runs on the free CPU tier. It limits input to 2-8 options (the trained range) and shows a research/education-only notice.
+
+### Try it locally first
+
+```bash
+.venv/bin/python -m pip install "gradio>=5,<6"     # demo-only dependency
+.venv/bin/python demo/app.py                       # open http://127.0.0.1:7860
+```
+
+It loads `artifacts/sagemaker/choicefit-l4-full-b8-001` automatically. Set `CHOICEFIT_MODEL` to use another folder or Hub repo id.
+
+### Publish
+
+1. Create a free account at https://huggingface.co/join.
+2. Create a **write** token at https://huggingface.co/settings/tokens and log in (the token is stored on your machine, never in the repo):
+   ```bash
+   .venv/bin/python -m huggingface_hub.commands.huggingface_cli login
+   ```
+3. Preview, then upload. This creates the model repo (`<you>/choicefit-roberta`, about 500 MB) and the Space (`<you>/choicefit-roberta-demo`) and links them:
+   ```bash
+   .venv/bin/python scripts/publish_to_hf.py --username YOUR_HF_NAME --dry-run
+   .venv/bin/python scripts/publish_to_hf.py --username YOUR_HF_NAME
+   ```
+4. Wait a few minutes for the Space to build, then open `https://huggingface.co/spaces/YOUR_HF_NAME/choicefit-roberta-demo`. The free tier sleeps when idle, so the first visit can take about a minute.
+
+The script uploads only the weights, config and tokenizer files (not `convergence.jsonl` or checkpoints). Re-running it updates the repos. It writes the model card, which names the source dataset and carries the research/education-only notice.

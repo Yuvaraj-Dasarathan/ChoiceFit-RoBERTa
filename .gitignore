@@ -31,3 +31,7 @@ data/typed-*/
 !.env.example
 .DS_Store
 *.log
+
+# Node
+node_modules/
+web/
