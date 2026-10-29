@@ -372,7 +372,7 @@ export default function App() {
             </table>
           </div>
           <p className="verified">
-            ✅ Real, measured numbers on held-out test data, not estimates. The same examples were run through both systems.{" "}
+            ✅ Not random or AI-made percentages: these were measured on held-out test data the model never trained on, with the same examples run through both systems.{" "}
             <a href={RESULTS} target="_blank" rel="noreferrer">See the raw reports on GitHub →</a>
           </p>
           <p className="muted small">Accuracy = how often the top-scored option was the correct one. JEV is a separate commercial API and was only used as a reference.</p>

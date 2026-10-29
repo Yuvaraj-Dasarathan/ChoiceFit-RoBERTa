@@ -16,7 +16,9 @@ Each (question + message, option description) pair goes through RoBERTa and gets
 
 ## Results
 
-**These are real, measured results, not estimates.** Every number comes from scripts in this repo run on held-out data, and the raw reports are committed in [`results/`](results/README.md). Hard accuracy: the top-scored option is the correct one.
+**These are not random or AI-generated percentages.** Every number was measured by scripts in this repo on held-out data the model never trained on, and the raw reports and per-row predictions are committed in [`results/`](results/README.md) so you can check or reproduce them.
+
+Hard accuracy = the top-scored option is the correct one.
 
 | Test set | ChoiceFit | TypeSafe JEV |
 | --- | ---: | ---: |
