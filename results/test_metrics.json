@@ -1,0 +1,10 @@
+{
+  "accuracy": 0.6668786770551757,
+  "hard_examples": 6289,
+  "soft_examples": 308,
+  "top_target_accuracy": 0.6593906321055025,
+  "mean_selected_target_probability": 0.6568328502957991,
+  "brier_score": 0.4237392226308004,
+  "loss": 0.78111762782847,
+  "examples": 6597
+}

@@ -1,0 +1,47 @@
+{
+  "examples": 6597,
+  "systems": {
+    "baseline": {
+      "brier_score": 0.6062976651355781,
+      "log_loss": 1.0500061645677832,
+      "mean_confidence": 0.3734323787037777,
+      "examples": 6597,
+      "hard_examples": 6289,
+      "hard_accuracy": 0.37001113054539675,
+      "top_target_accuracy": 0.3672881612854328,
+      "mean_selected_target_probability": 0.3671199754741019
+    },
+    "choicefit": {
+      "brier_score": 0.4237392489057748,
+      "log_loss": 0.7811177057962388,
+      "mean_confidence": 0.7181959955601398,
+      "examples": 6597,
+      "hard_examples": 6289,
+      "hard_accuracy": 0.6668786770551757,
+      "top_target_accuracy": 0.6593906321055025,
+      "mean_selected_target_probability": 0.6568328501401833
+    },
+    "jev": {
+      "brier_score": 0.3111110065823358,
+      "log_loss": 0.8239890719799395,
+      "mean_confidence": 0.835038653933591,
+      "examples": 6597,
+      "hard_examples": 6289,
+      "hard_accuracy": 0.7824773413897281,
+      "top_target_accuracy": 0.7753524329240564,
+      "mean_selected_target_probability": 0.7698234171523635
+    }
+  },
+  "all_correct": 1337,
+  "none_correct": 498,
+  "only_correct": {
+    "baseline": 252,
+    "choicefit": 411,
+    "jev": 984
+  },
+  "agreement_with": {
+    "baseline~choicefit": 2464,
+    "baseline~jev": 2336,
+    "choicefit~jev": 4142
+  }
+}

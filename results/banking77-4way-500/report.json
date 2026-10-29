@@ -1,0 +1,47 @@
+{
+  "examples": 500,
+  "systems": {
+    "baseline": {
+      "brier_score": 0.7504330197101993,
+      "log_loss": 1.387160487723858,
+      "mean_confidence": 0.25058051776885987,
+      "examples": 500,
+      "hard_examples": 500,
+      "hard_accuracy": 0.122,
+      "top_target_accuracy": 0.122,
+      "mean_selected_target_probability": 0.122
+    },
+    "choicefit": {
+      "brier_score": 0.4586867395679048,
+      "log_loss": 0.8675940118409704,
+      "mean_confidence": 0.6914823597669602,
+      "examples": 500,
+      "hard_examples": 500,
+      "hard_accuracy": 0.67,
+      "top_target_accuracy": 0.67,
+      "mean_selected_target_probability": 0.67
+    },
+    "jev": {
+      "brier_score": 0.05525300000000001,
+      "log_loss": 0.19302354153054568,
+      "mean_confidence": 0.9765000000000006,
+      "examples": 500,
+      "hard_examples": 500,
+      "hard_accuracy": 0.962,
+      "top_target_accuracy": 0.962,
+      "mean_selected_target_probability": 0.962
+    }
+  },
+  "all_correct": 30,
+  "none_correct": 11,
+  "only_correct": {
+    "baseline": 2,
+    "choicefit": 6,
+    "jev": 123
+  },
+  "agreement_with": {
+    "baseline~choicefit": 67,
+    "baseline~jev": 61,
+    "choicefit~jev": 335
+  }
+}

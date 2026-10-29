@@ -178,3 +178,7 @@ pre { margin: 8px 0; padding: 12px; background: #2a1a12; color: #ffe9d6; border-
 .cmp tr:last-child td { border-bottom: 0; }
 .cmp td b { color: var(--o600); }
 .cmp .small { font-size: 12px; margin-top: 8px; }
+.links { flex: none; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.cta.alt { margin-top: 10px; background: #fff; color: var(--o600); border: 2px solid var(--o500); }
+.verified { margin: 10px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--o500); border-radius: 12px; font-size: 14px; line-height: 1.45; }
+.verified a { color: var(--o600); font-weight: 700; }

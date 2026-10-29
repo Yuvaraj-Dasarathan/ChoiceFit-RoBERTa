@@ -86,6 +86,8 @@ const EXAMPLES = [
 ];
 
 const REPO = "https://github.com/Yuvaraj-Dasarathan/ChoiceFit-RoBERTa";
+const RESULTS = "https://github.com/Yuvaraj-Dasarathan/ChoiceFit-RoBERTa/tree/training/results";
+const HF = "https://huggingface.co/Yuvaraj-ml/choicefit-roberta";
 
 const TOPICS = [
   ["Reasoning & logic (does one statement follow from another?)", 34],
@@ -185,10 +187,15 @@ export default function App() {
             <h1>ChoiceFit <span>Playground</span></h1>
             <p>Fine-tuned RoBERTa that picks the best answer for a message from 2–8 options.</p>
           </div>
-          <a className="gh" href={REPO} target="_blank" rel="noreferrer">
-            <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.72 1.22 1.88.87 2.34.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
-            GitHub
-          </a>
+          <div className="links">
+            <a className="gh" href={REPO} target="_blank" rel="noreferrer">
+              <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.72 1.22 1.88.87 2.34.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+              GitHub
+            </a>
+            <a className="gh" href={HF} target="_blank" rel="noreferrer">
+              <span aria-hidden="true">🤗</span> Model
+            </a>
+          </div>
         </div>
       </section>
 
@@ -297,7 +304,7 @@ export default function App() {
             <div><b>~½ million</b><span>training examples</span></div>
             <div><b>2–8</b><span>options per example</span></div>
             <div><b>3</b><span>passes over the data (epochs)</span></div>
-            <div><b>50+ hrs</b><span>total effort, incl. laptop testing</span></div>
+            <div><b>50+ hrs</b><span>total training effort, incl. laptop testing</span></div>
           </div>
 
           <div className="two">
@@ -341,6 +348,9 @@ export default function App() {
             <a className="cta" href={REPO} target="_blank" rel="noreferrer">
               To learn more about how this BERT-based model was trained, check out the GitHub repo →
             </a>
+            <a className="cta alt" href={HF} target="_blank" rel="noreferrer">
+              🤗 Download the trained model on Hugging Face →
+            </a>
           </div>
         <div className="cmp">
           <h3>ChoiceFit vs TypeSafe JEV</h3>
@@ -361,6 +371,10 @@ export default function App() {
               </tbody>
             </table>
           </div>
+          <p className="verified">
+            ✅ Real, measured numbers on held-out test data, not estimates. The same examples were run through both systems.{" "}
+            <a href={RESULTS} target="_blank" rel="noreferrer">See the raw reports on GitHub →</a>
+          </p>
           <p className="muted small">Accuracy = how often the top-scored option was the correct one. JEV is a separate commercial API and was only used as a reference.</p>
         </div>
       </div>

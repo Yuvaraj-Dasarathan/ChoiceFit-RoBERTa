@@ -1,0 +1,108 @@
+{
+  "arguments": {
+    "train": "/opt/ml/input/data/train/train.jsonl",
+    "validation": "/opt/ml/input/data/validation/validation.jsonl",
+    "output": "/opt/ml/model",
+    "model": "/opt/ml/input/data/base",
+    "epochs": 3,
+    "batch_size": 8,
+    "max_pairs": 64,
+    "gradient_accumulation_steps": 8,
+    "gradient_checkpointing": true,
+    "shuffle_buffer": 10000,
+    "eval_pair_batch_size": 32,
+    "log_every": 625,
+    "learning_rate": 2e-05,
+    "warmup_ratio": 0.1,
+    "precision": "bf16",
+    "max_length": 256,
+    "seed": 42,
+    "device": "cuda",
+    "checkpoint_dir": "/opt/ml/checkpoints",
+    "checkpoint_every": 313,
+    "convergence_jsonl": "/opt/ml/model/convergence.jsonl",
+    "eval_every": 625,
+    "early_stopping_patience": 5,
+    "early_stopping_min_delta": 0.0001,
+    "early_stopping_min_validations": 3
+  },
+  "history": [
+    {
+      "epoch": 0,
+      "validation": {
+        "accuracy": 0.3792020106817468,
+        "hard_examples": 6366,
+        "soft_examples": 285,
+        "top_target_accuracy": 0.37663509246729815,
+        "mean_selected_target_probability": 0.3747553686807253,
+        "brier_score": 0.6082436170654716,
+        "loss": 1.0510514125557273,
+        "examples": 6651
+      },
+      "epoch_seconds": 60.47,
+      "is_best": false,
+      "validations_without_improvement": 0
+    },
+    {
+      "epoch": 1,
+      "train_loss": 0.8855699832841198,
+      "examples": 485945,
+      "updates": 7593,
+      "train_seconds": 9823.21,
+      "validation": {
+        "accuracy": 0.6288092994030788,
+        "hard_examples": 6366,
+        "soft_examples": 285,
+        "top_target_accuracy": 0.6224627875507442,
+        "mean_selected_target_probability": 0.6199728301227084,
+        "brier_score": 0.44859709760495564,
+        "loss": 0.8061426707811306,
+        "examples": 6651
+      },
+      "epoch_seconds": 9889.08,
+      "is_best": true,
+      "validations_without_improvement": 0
+    },
+    {
+      "epoch": 2,
+      "train_loss": 0.70039912102718,
+      "examples": 485945,
+      "updates": 7593,
+      "train_seconds": 9829.95,
+      "validation": {
+        "accuracy": 0.671693371033616,
+        "hard_examples": 6366,
+        "soft_examples": 285,
+        "top_target_accuracy": 0.6666666666666666,
+        "mean_selected_target_probability": 0.6629378805123242,
+        "brier_score": 0.42712631836056997,
+        "loss": 0.8055539100304973,
+        "examples": 6651
+      },
+      "epoch_seconds": 9895.74,
+      "is_best": false,
+      "validations_without_improvement": 1
+    },
+    {
+      "epoch": 3,
+      "train_loss": 0.6216633759347722,
+      "examples": 240000,
+      "updates": 3750,
+      "train_seconds": 4841.49,
+      "stopped_early": true,
+      "validation": {
+        "accuracy": 0.683631793905121,
+        "hard_examples": 6366,
+        "soft_examples": 285,
+        "top_target_accuracy": 0.6770410464591791,
+        "mean_selected_target_probability": 0.6738574481193257,
+        "brier_score": 0.4162215868623739,
+        "loss": 0.7934766652455417,
+        "examples": 6651
+      },
+      "epoch_seconds": 4906.91,
+      "is_best": false,
+      "validations_without_improvement": 5
+    }
+  ]
+}
