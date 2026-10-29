@@ -51,7 +51,7 @@ a collection of roughly 400 source datasets with mixed licenses (some non-commer
 - Weak on knowledge-heavy and many-similar-label questions.
 - Overconfident: stated probabilities run higher than actual accuracy.
 
-Code: https://github.com/yuvarajd2588/ChoiceFit-RoBERTa
+Code: https://github.com/Yuvaraj-Dasarathan/ChoiceFit-RoBERTa
 """
 
 SPACE_README = """---

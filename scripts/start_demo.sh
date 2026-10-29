@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-ORIGIN="${CHOICEFIT_ORIGINS:-https://yuvarajd2588.github.io}"
+ORIGIN="${CHOICEFIT_ORIGINS:-https://yuvaraj-dasarathan.github.io}"
 PORT="${PORT:-8000}"
 
 command -v ngrok >/dev/null || { echo "ngrok not found on PATH"; exit 1; }

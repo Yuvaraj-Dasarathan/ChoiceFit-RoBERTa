@@ -311,7 +311,7 @@ The script uploads only the weights, config and tokenizer files (not `convergenc
 
 The Hugging Face Gradio Space needs a PRO plan (section 14), so the demo runs like this instead:
 
-- **UI:** React app in `ui/`, deployed to GitHub Pages by `.github/workflows/pages.yml` on every push to `training` that touches `ui/`. Live at `https://yuvarajd2588.github.io/ChoiceFit-RoBERTa/`. In the repo's Settings > Pages, **Source** must be **GitHub Actions**.
+- **UI:** React app in `ui/`, deployed to GitHub Pages by `.github/workflows/pages.yml` on every push to `training` that touches `ui/`. Live at `https://yuvaraj-dasarathan.github.io/ChoiceFit-RoBERTa/`. In the repo's Settings > Pages, **Source** must be **GitHub Actions**.
 - **API:** `server/api.py` (FastAPI, `POST /predict`, `GET /health`) on your laptop, exposed by ngrok at your fixed dev domain.
 - If the laptop is off, the page still loads and shows "The server is temporarily down."
 
@@ -322,7 +322,7 @@ cd /Users/yuvaraj/Desktop/AI/choicefit_roberta
 scripts/start_demo.sh
 ```
 
-This starts the API (CORS allowed only for `https://yuvarajd2588.github.io`), starts `ngrok http 8000`, keeps the Mac awake, and prints the public URL. Press Ctrl+C to stop both. The page checks `/health` once when it opens (to show the "temporarily down" banner); after that only a failed submit reports an error, so refresh the page after starting the server.
+This starts the API (CORS allowed only for `https://yuvaraj-dasarathan.github.io`), starts `ngrok http 8000`, keeps the Mac awake, and prints the public URL. Press Ctrl+C to stop both. The page checks `/health` once when it opens (to show the "temporarily down" banner); after that only a failed submit reports an error, so refresh the page after starting the server.
 
 Test it locally at `http://127.0.0.1:8000` (the API also serves the built UI from `web/` if it exists).
 
