@@ -11,13 +11,15 @@ const MAX_OPTIONS = 8;
 
 const EXAMPLES = [
   {
-    name: "Banking: duplicate charge",
+    name: "Duplicate charge",
+    tag: "Banking",
     message: "I was charged twice for the same coffee this morning.",
     question: DEFAULT_QUESTION,
     options: ["Report an incorrect or duplicate charge", "Reset a forgotten password", "Open a new bank account"],
   },
   {
-    name: "Sentiment",
+    name: "Mixed sentiment",
+    tag: "Sentiment",
     message: "The movie was a total waste of two hours, but the soundtrack was lovely.",
     question: "What is the overall sentiment?",
     options: [
@@ -28,10 +30,53 @@ const EXAMPLES = [
     ],
   },
   {
-    name: "Banking: reverted top-up",
+    name: "Reverted top-up",
+    tag: "Banking",
     message: "My top-up was reverted, why did this happen?",
     question: DEFAULT_QUESTION,
     options: ["Top up was reverted", "Card payment fee charged", "Change PIN", "Transfer fee charged"],
+  },
+  {
+    name: "Capital of France",
+    tag: "General knowledge",
+    message: "Capital of france is paris",
+    question: "What is the capital of France?",
+    options: ["New Delhi", "France", "London", "Paris"],
+  },
+  {
+    name: "Software bug",
+    tag: "Support",
+    message: "The app crashes when I open settings.",
+    question: "What kind of problem is the customer reporting?",
+    options: ["A software bug", "A billing problem", "A request for a new feature", "A compliment"],
+  },
+  {
+    name: "Reschedule",
+    tag: "Email intent",
+    message: "Could we move tomorrow's 3pm call to Thursday morning instead?",
+    question: "What does the sender want?",
+    options: ["Reschedule a meeting", "Cancel the subscription", "Request a refund", "Ask for a product demo"],
+  },
+  {
+    name: "Lost card",
+    tag: "Banking",
+    message: "I think someone stole my card, I can't find it anywhere",
+    question: DEFAULT_QUESTION,
+    options: ["Report a lost or stolen card", "Change PIN", "Check exchange rate", "Top up account"],
+  },
+  {
+    name: "Safe command",
+    tag: "Safety",
+    message: "Command: rm -rf ./node_modules && npm install",
+    question: "How risky is this shell command?",
+    options: ["Safe, routine cleanup", "Risky, could delete important data", "Unrelated to files"],
+  },
+  {
+    name: "Dangerous command",
+    tag: "Safety",
+    message: "Command: rm -rf / --no-preserve-root",
+    question: "How risky is this shell command?",
+    options: ["Safe, routine cleanup", "Risky, could delete important data", "Unrelated to files"],
   },
 ];
 
@@ -44,6 +89,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [online, setOnline] = useState(true);
+  const [active, setActive] = useState(0);
 
   useEffect(() => {
     const check = () =>
@@ -57,6 +103,7 @@ export default function App() {
 
   const loadExample = (i) => {
     const ex = EXAMPLES[i];
+    setActive(i);
     setMessage(ex.message);
     setQuestion(ex.question);
     setOptions(ex.options);
@@ -82,12 +129,12 @@ export default function App() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const detail = typeof data.detail === "string" ? data.detail : "Request failed (" + res.status + ").";
+        const detail = typeof data.detail === "string" ? data.detail : "The server is temporarily down. Please try again after some time.";
         throw new Error(detail);
       }
       setResult(data);
     } catch (e) {
-      setError(e.message === "Failed to fetch" ? "Could not reach the model server. It may be offline." : e.message);
+      setError(e instanceof TypeError ? "The server is temporarily down. Please try again after some time." : e.message);
     } finally {
       setLoading(false);
     }
@@ -95,6 +142,12 @@ export default function App() {
 
   return (
     <div className="page">
+      {!online && (
+        <div className="offline">
+          The server is temporarily down. Please try again after some time.
+        </div>
+      )}
+
       <header>
         <h1>ChoiceFit Playground</h1>
         <p>
@@ -103,22 +156,23 @@ export default function App() {
         </p>
       </header>
 
-      {!online && (
-        <div className="offline">
-          The model server is temporarily offline. It runs on a personal laptop, so please try again later.
+      <div className="examples">
+        <div className="examples-title">Try an example (click to load, then edit it)</div>
+        <div className="chips">
+          {EXAMPLES.map((ex, i) => (
+            <button key={ex.name} className={"chip" + (active === i ? " active" : "")} onClick={() => loadExample(i)}>
+              <small>{ex.tag}</small>
+              {ex.name}
+            </button>
+          ))}
         </div>
-      )}
+      </div>
 
       <div className="grid">
         <section className="card">
           <div className="row">
             <h2>Input</h2>
-            <select onChange={(e) => e.target.value !== "" && loadExample(Number(e.target.value))} defaultValue="">
-              <option value="">Load an example...</option>
-              {EXAMPLES.map((ex, i) => (
-                <option key={ex.name} value={i}>{ex.name}</option>
-              ))}
-            </select>
+            <span className="muted">Edit anything, then score</span>
           </div>
 
           <label>Message</label>
@@ -140,7 +194,7 @@ export default function App() {
             <button className="link" onClick={() => setOptions([...options, ""])}>+ Add option</button>
           )}
 
-          <button className="primary" onClick={run} disabled={loading || !online}>
+          <button className="primary" onClick={run} disabled={loading}>
             {loading ? "Scoring..." : "Score options"}
           </button>
           {error && <div className="error">{error}</div>}
