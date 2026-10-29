@@ -182,4 +182,10 @@ pre { margin: 8px 0; padding: 12px; background: #2a1a12; color: #ffe9d6; border-
 .cta.alt { margin-top: 10px; background: #fff; color: var(--o600); border: 2px solid var(--o500); }
 .verified { margin: 10px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--o500); border-radius: 12px; font-size: 14px; line-height: 1.45; }
 .verified a { color: var(--o600); font-weight: 700; }
-.hero .goal { display: inline-block; margin: 8px 0 0; padding: 7px 12px; background: #fff; color: var(--o600); border-radius: 12px; font-size: 14px; font-weight: 800; line-height: 1.35; box-shadow: 0 4px 12px rgba(0,0,0,.15); }
+.goal { margin: 14px 0 0; padding: 12px 14px; background: #fff; color: var(--o600); border: 2px solid var(--o500); border-radius: 14px; font-size: 15px; font-weight: 800; line-height: 1.4; box-shadow: 0 4px 12px rgba(234,88,12,.15); }
+@media (min-width: 720px) { .goal { font-size: 17px; text-align: center; } }
+@media (max-width: 560px) {
+  .hero-row { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .links { justify-content: flex-start; }
+  .gh { padding: 6px 11px; font-size: 12px; }
+}

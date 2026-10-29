@@ -42,9 +42,16 @@ JEV is stronger on every set, as expected for a commercial system. ChoiceFit is 
 
 **2. Choosing the learning rate.** The trainer logs every update's loss and periodic validation loss (`convergence.jsonl`), and `src/plot_convergence.py` overlays runs. I compared 5e-6, 1e-5 and 2e-5 on the same seed, splits and epochs, and picked the rate with stable loss decrease and the lowest validation loss. The full run used **2e-5** with 10% warmup and linear decay.
 
-**3. Full training on AWS SageMaker.** Instance `ml.g6.2xlarge` with **one NVIDIA L4 GPU (24 GB)**, on-demand, bf16, 256 tokens, up to 8 options, about 64 messages per optimizer update, 3 epochs, best-validation checkpoint, recovery checkpoints to S3. Each pass over the 486k examples took about 2.7 hours; total training was about **6.8 hours of GPU time**. Validation accuracy rose from 37.9% (before training) to 62.9%, 67.2%, then 68.4% across epochs.
+**3. Full training on AWS SageMaker.** Instance `ml.g6.2xlarge` with **one NVIDIA L4 GPU (24 GB)**, on-demand, bf16, 256 tokens, up to 8 options, about 64 messages per optimizer update, learning rate 2e-5, up to 3 epochs. The trainer validated every 625 updates, kept the weights with the **lowest validation loss**, and stopped early after 5 checks without improvement. SageMaker billed about 8 hours on the L4 (the training loop itself ran about 6.8 hours, the rest is startup, data download and evaluation).
 
-**Time and cost.** About 50+ hours of total effort, counting laptop experiments, cloud runs, evaluation and building the demo. Total spend was about **$50**, all inclusive: the main SageMaker run (about 6.8 GPU hours), an earlier separate 360K+ row run with smaller batch and token size and a different learning rate (it ran 13+ hours and was not kept), small pilot jobs, and the paid JEV API calls used for testing.
+**Convergence, as measured** (see `results/training_metrics.json`):
+- Validation accuracy rose from 37.9% (before training) to about 67% by epoch 2.
+- The lowest validation loss (0.764) came early in epoch 3, at about 2.1 epochs. The saved model is that checkpoint (validation accuracy 67.1%, test 66.7%).
+- After that, validation loss stopped improving (it bounced between about 0.77 and 0.80) while training loss kept falling (0.89, 0.70, 0.62 by epoch). That gap is the start of overfitting, so early stopping ended the run at about 2.5 of 3 epochs.
+
+**GPU use.** Raising batch size and token length took L4 memory use only from about 14% to about 20%, so the run was limited by something other than memory (gradient checkpointing and compute are the likely causes). The lesson: measure utilization instead of assuming that bigger batches speed things up.
+
+**Time and cost.** About 50+ hours of total effort, counting laptop experiments, cloud runs, evaluation and building the demo. SageMaker billing showed about 8 hours on the L4 for the main run and about 16 hours of exploratory runs on `ml.g4dn.xlarge` (NVIDIA T4). Total spend was about **$50**, all inclusive: those runs, an earlier 360K+ row experiment with smaller batch and token size and a different learning rate (13+ hours, not kept), small pilots, and the paid JEV API calls used for testing.
 
 ## Evaluate against JEV
 

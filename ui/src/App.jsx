@@ -186,7 +186,6 @@ export default function App() {
           <div>
             <h1>ChoiceFit <span>Playground</span></h1>
             <p>Fine-tuned RoBERTa that picks the best answer for a message from 2–8 options.</p>
-            <p className="goal">🎯 Goal: Learn how close a small fine-tuned model can get to TypeSafe.ai's JEV.</p>
           </div>
           <div className="links">
             <a className="gh" href={REPO} target="_blank" rel="noreferrer">
@@ -199,6 +198,10 @@ export default function App() {
           </div>
         </div>
       </section>
+
+      <div className="wrap">
+        <p className="goal">🎯 Goal: Learn how close a small fine-tuned model can get to TypeSafe.ai's JEV.</p>
+      </div>
 
       <main className="wrap">
         <div className="steps">
@@ -304,7 +307,7 @@ export default function App() {
           <div className="tiles">
             <div><b>~½ million</b><span>training examples</span></div>
             <div><b>2–8</b><span>options per example</span></div>
-            <div><b>3</b><span>passes over the data (epochs)</span></div>
+            <div><b>~2.5</b><span>passes over the data (early-stopped)</span></div>
             <div><b>50+ hrs</b><span>total training effort, incl. laptop testing</span></div>
           </div>
 
@@ -342,7 +345,7 @@ export default function App() {
             <h3>Where and how it was trained</h3>
             <ul>
               <li><b>Hardware:</b> AWS SageMaker <code>ml.g6.2xlarge</code> with one <b>NVIDIA L4</b> GPU (24 GB).</li>
-              <li><b>Setup:</b> bf16 precision, 256-token limit, learning rate 2e-5, about 64 messages per update.</li>
+              <li><b>Setup:</b> bf16 precision, 256-token limit, learning rate 2e-5, about 64 messages per update, stopped early once validation loss stopped improving.</li>
               <li><b>Time:</b> 50+ hours overall (approx.), counting cloud training plus testing and evaluation on my laptop.</li>
               <li><b>Result:</b> 66.7% accuracy on 6,597 unseen test examples. It can be overconfident.</li>
             </ul>

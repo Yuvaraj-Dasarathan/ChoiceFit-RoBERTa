@@ -50,12 +50,12 @@ what the model reads, so new options never need retraining.
 | | |
 | --- | --- |
 | Hardware | AWS SageMaker `ml.g6.2xlarge`, 1x NVIDIA L4 (24 GB) |
-| Training time | about 6.8 hours of GPU time (about 2.7 hours per pass over the data) |
+| Training time | about 8 billed hours (about 6.8 hours of training loop), stopped early at about 2.5 of 3 epochs |
 | Precision | bf16 |
 | Learning rate | 2e-5, 10% warmup, linear decay |
 | Max length | 256 tokens, up to 8 options |
 | Batch | about 64 messages per optimizer update |
-| Selection | best validation checkpoint |
+| Selection | lowest validation loss (0.764, validation accuracy 67.1%), checked every 625 updates |
 
 ## Results (hard accuracy: the top-scored option is the correct one)
 
