@@ -186,6 +186,7 @@ export default function App() {
           <div>
             <h1>ChoiceFit <span>Playground</span></h1>
             <p>Fine-tuned RoBERTa that picks the best answer for a message from 2–8 options.</p>
+            <p className="goal">🎯 Goal: Learn how close a small fine-tuned model can get to TypeSafe.ai's JEV.</p>
           </div>
           <div className="links">
             <a className="gh" href={REPO} target="_blank" rel="noreferrer">
@@ -356,8 +357,7 @@ export default function App() {
           <h3>ChoiceFit vs TypeSafe JEV</h3>
           <p className="muted">
             This training and evaluation approach is inspired by TypeSafe.ai's JEV classification. I ran the same
-            labeled examples through my model and the JEV API. JEV scores higher on every set. The point of this project is to learn how close a small fine-tuned
-            model can get.
+            labeled examples through my model and the JEV API. JEV scores higher on every set.
           </p>
           <div className="tablewrap">
             <table>

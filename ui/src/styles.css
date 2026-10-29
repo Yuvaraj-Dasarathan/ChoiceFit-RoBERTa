@@ -182,3 +182,4 @@ pre { margin: 8px 0; padding: 12px; background: #2a1a12; color: #ffe9d6; border-
 .cta.alt { margin-top: 10px; background: #fff; color: var(--o600); border: 2px solid var(--o500); }
 .verified { margin: 10px 0 0; padding: 10px 12px; background: #fff; border: 1px solid var(--o500); border-radius: 12px; font-size: 14px; line-height: 1.45; }
 .verified a { color: var(--o600); font-weight: 700; }
+.hero .goal { display: inline-block; margin: 8px 0 0; padding: 7px 12px; background: #fff; color: var(--o600); border-radius: 12px; font-size: 14px; font-weight: 800; line-height: 1.35; box-shadow: 0 4px 12px rgba(0,0,0,.15); }
