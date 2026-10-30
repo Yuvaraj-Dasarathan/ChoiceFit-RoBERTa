@@ -42,7 +42,7 @@ JEV is stronger on every set, as expected for a commercial system. ChoiceFit is 
 
 **2. Choosing the learning rate.** The trainer logs every update's loss and periodic validation loss (`convergence.jsonl`), and `src/plot_convergence.py` overlays runs. I compared 5e-6, 1e-5 and 2e-5 on the same seed, splits and epochs, and picked the rate with stable loss decrease and the lowest validation loss. The full run used **2e-5** with 10% warmup and linear decay.
 
-**3. Full training on AWS SageMaker.** Instance `ml.g6.2xlarge` with **one NVIDIA L4 GPU (24 GB)**, on-demand, bf16, 256 tokens, up to 8 options, about 64 messages per optimizer update, learning rate 2e-5, up to 3 epochs. The trainer validated every 625 updates, kept the weights with the **lowest validation loss**, and stopped early after 5 checks without improvement. SageMaker billed about 8 hours on the L4 (the training loop itself ran about 6.8 hours, the rest is startup, data download and evaluation).
+**3. Full training on AWS SageMaker.** Instance `ml.g6.2xlarge` with **one NVIDIA L4 GPU (24 GB)**, on-demand, bf16, 256 tokens, up to 8 options, about 64 messages per optimizer update, learning rate 2e-5, up to 3 epochs. The trainer validated every 625 updates, kept the weights with the **lowest validation loss**, and stopped early after 5 checks without improvement. SageMaker billed about 7 hours (25,089 s) for the final run on the L4.
 
 **Convergence, as measured** (see `results/training_metrics.json`):
 - Validation accuracy rose from 37.9% (before training) to about 67% by epoch 2.
@@ -51,7 +51,7 @@ JEV is stronger on every set, as expected for a commercial system. ChoiceFit is 
 
 **GPU use.** Raising batch size and token length took L4 memory use only from about 14% to about 20%, so the run was limited by something other than memory (gradient checkpointing and compute are the likely causes). The lesson: measure utilization instead of assuming that bigger batches speed things up.
 
-**Time and cost.** About 50+ hours of total effort, counting laptop experiments, cloud runs, evaluation and building the demo. SageMaker billing showed about 8 hours on the L4 for the main run and about 16 hours of exploratory runs on `ml.g4dn.xlarge` (NVIDIA T4). Total spend was about **$50**, all inclusive: those runs, an earlier 360K+ row experiment with smaller batch and token size and a different learning rate (13+ hours, not kept), small pilots, and the paid JEV API calls used for testing.
+**Time and cost.** About 50+ hours of total effort, counting laptop experiments, cloud runs, evaluation and building the demo. SageMaker billing: **20+ GPU hours in total** across all runs. About 7 hours on the L4 for the main run (plus a 23-minute L4 pilot), and about 16 hours on `ml.g4dn.xlarge` (NVIDIA T4), mostly one 15.4-hour run at learning rate 1e-5 (batch 1, 192 tokens, about 392K rows; 63.0% validation accuracy, 58.8% test) Compared with those, the final L4 setup (learning rate 2e-5, bigger batch) reached 68.4% validation accuracy. Total spend was about **$50**, all inclusive: those runs, small pilots, and the paid JEV API calls used for testing.
 
 ## Evaluate against JEV
 

@@ -76,6 +76,8 @@ button.primary {
   color: #fff; font-size: 16px; font-weight: 700; box-shadow: 0 8px 18px rgba(234, 88, 12, .35);
 }
 button.primary:active { transform: translateY(1px); }
+button.reset { width: 100%; margin-top: 10px; padding: 11px; border-radius: 12px; border: 1.5px solid var(--o400); background: #fff; color: var(--o600); font-weight: 700; font-size: 15px; cursor: pointer; }
+button.reset:disabled { opacity: .45; cursor: not-allowed; border-color: var(--line); color: var(--muted); }
 button.primary:disabled { opacity: .75; cursor: wait; }
 .error { margin-top: 12px; padding: 11px 13px; background: #fef2f2; color: #b91c1c; border-radius: 12px; font-size: 14px; }
 .muted { color: var(--muted); font-size: 13px; }

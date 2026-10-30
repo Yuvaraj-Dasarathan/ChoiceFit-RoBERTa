@@ -119,6 +119,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [online, setOnline] = useState(true);
   const [active, setActive] = useState(0);
+  const [edited, setEdited] = useState(false);
   const resultRef = useRef(null);
   const [seconds, setSeconds] = useState(null);
 
@@ -137,9 +138,25 @@ export default function App() {
     setOptions(ex.options);
     setResult(null);
     setError("");
+    setEdited(false);
   };
 
-  const setOption = (i, value) => setOptions(options.map((o, j) => (j === i ? value : o)));
+  const touch = (fn) => (...args) => {
+    setEdited(true);
+    fn(...args);
+  };
+
+  const resetAll = () => {
+    setActive(-1);
+    setMessage("");
+    setQuestion("");
+    setOptions(["", ""]);
+    setResult(null);
+    setError("");
+    setEdited(false);
+  };
+
+  const setOption = touch((i, value) => setOptions(options.map((o, j) => (j === i ? value : o))));
 
   const run = async () => {
     setError("");
@@ -200,7 +217,7 @@ export default function App() {
       </section>
 
       <div className="wrap">
-        <p className="goal">🎯 Goal: Learn how close a small fine-tuned model can get to TypeSafe.ai's JEV.</p>
+        <p className="goal">🎯 Goal: Learn how close a small fine-tuned model can get to frontier classification models.</p>
       </div>
 
       <main className="wrap">
@@ -225,10 +242,10 @@ export default function App() {
             <h2>Your input</h2>
 
             <label>Message</label>
-            <textarea rows={4} maxLength={2000} value={message} onChange={(e) => setMessage(e.target.value)} />
+            <textarea rows={4} maxLength={2000} value={message} onChange={touch((e) => setMessage(e.target.value))} />
 
             <label>Question</label>
-            <input value={question} maxLength={500} onChange={(e) => setQuestion(e.target.value)} />
+            <input value={question} maxLength={500} onChange={touch((e) => setQuestion(e.target.value))} />
 
             <label>Options <span className="count">{options.length}/{MAX_OPTIONS}</span></label>
             {options.map((o, i) => (
@@ -236,17 +253,20 @@ export default function App() {
                 <span className="num">{i + 1}</span>
                 <input value={o} maxLength={300} placeholder={"Option " + (i + 1)} onChange={(e) => setOption(i, e.target.value)} />
                 {options.length > 2 && (
-                  <button className="icon" aria-label="Remove option" onClick={() => setOptions(options.filter((_, j) => j !== i))}>×</button>
+                  <button className="icon" aria-label="Remove option" onClick={touch(() => setOptions(options.filter((_, j) => j !== i)))}>×</button>
                 )}
               </div>
             ))}
             {options.length < MAX_OPTIONS && (
-              <button className="link" onClick={() => setOptions([...options, ""])}>+ Add option</button>
+              <button className="link" onClick={touch(() => setOptions([...options, ""]))}>+ Add option</button>
             )}
 
             <button className="primary" onClick={run} disabled={loading}>
               {loading ? <span className="spinner" /> : null}
               {loading ? "Sending to RoBERTa…" : "Score options"}
+            </button>
+            <button className="reset" onClick={resetAll} disabled={!edited || loading}>
+              Reset
             </button>
             {error && <div className="error">{error}</div>}
           </section>
