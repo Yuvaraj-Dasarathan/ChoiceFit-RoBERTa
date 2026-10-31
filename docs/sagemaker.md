@@ -282,7 +282,7 @@ For any other dataset, write a converter that produces rows with `message`, `que
 
 Hugging Face Gradio Spaces need a PRO plan, so the demo runs like this instead:
 
-- **UI:** React app in `ui/`, deployed to GitHub Pages by `.github/workflows/pages.yml` on every push to `training` that touches `ui/`. Live at `https://yuvaraj-dasarathan.github.io/ChoiceFit-RoBERTa/`. In the repo's Settings > Pages, **Source** must be **GitHub Actions**.
+- **UI:** React app in `ui/`, deployed to GitHub Pages by `.github/workflows/pages.yml` on every push to `main` that touches `ui/`. Live at `https://yuvaraj-dasarathan.github.io/ChoiceFit-RoBERTa/`. In the repo's Settings > Pages, **Source** must be **GitHub Actions**.
 - **API:** `server/api.py` (FastAPI, `POST /predict`, `GET /health`) on your laptop, exposed by ngrok at your fixed dev domain.
 - If the laptop is off, the page still loads and shows "The server is temporarily down."
 

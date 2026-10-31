@@ -86,7 +86,7 @@ const EXAMPLES = [
 ];
 
 const REPO = "https://github.com/Yuvaraj-Dasarathan/ChoiceFit-RoBERTa";
-const RESULTS = "https://github.com/Yuvaraj-Dasarathan/ChoiceFit-RoBERTa/tree/training/results";
+const RESULTS = "https://github.com/Yuvaraj-Dasarathan/ChoiceFit-RoBERTa/tree/main/results";
 const HF = "https://huggingface.co/Yuvaraj-ml/choicefit-roberta";
 
 const TOPICS = [

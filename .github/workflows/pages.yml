@@ -2,7 +2,7 @@ name: Deploy UI to GitHub Pages
 
 on:
   push:
-    branches: [training]
+    branches: [main]
     paths: ["ui/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
 

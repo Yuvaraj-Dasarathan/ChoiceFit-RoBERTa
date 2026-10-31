@@ -59,7 +59,7 @@ what the model reads, so new options never need retraining.
 
 ## Results (hard accuracy: the top-scored option is the correct one)
 
-**These are not random or AI-generated percentages.** Every number was measured on held-out data the model never trained on, the same rows were run through both systems, and the raw reports and per-row predictions are public so you can check them: https://github.com/Yuvaraj-Dasarathan/ChoiceFit-RoBERTa/tree/training/results
+**These are not random or AI-generated percentages.** Every number was measured on held-out data the model never trained on, the same rows were run through both systems, and the raw reports and per-row predictions are public so you can check them: https://github.com/Yuvaraj-Dasarathan/ChoiceFit-RoBERTa/tree/main/results
 
 | Test set | ChoiceFit | JEV (TypeSafe.ai) |
 | --- | ---: | ---: |
