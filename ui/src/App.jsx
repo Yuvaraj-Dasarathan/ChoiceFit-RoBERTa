@@ -109,6 +109,13 @@ const SAMPLE = `{
   ]
 }`;
 
+const browserInfo = () => ({
+  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+  language: navigator.language,
+  screen: `${window.screen.width}x${window.screen.height}`,
+  page: location.href,
+});
+
 export default function App() {
   const first = EXAMPLES[0];
   const [message, setMessage] = useState(first.message);
@@ -174,7 +181,7 @@ export default function App() {
       const res = await fetch(API + "/predict", {
         method: "POST",
         headers: HEADERS,
-        body: JSON.stringify({ message, question, options: cleaned }),
+        body: JSON.stringify({ message, question, options: cleaned, client: browserInfo() }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -409,7 +416,7 @@ export default function App() {
           <a href="https://huggingface.co/datasets/tasksource/tasksource-jev-typed-decisions" target="_blank" rel="noreferrer">
             tasksource-jev-typed-decisions
           </a>
-          . The model can be overconfident and shouldn't be used for real decisions. Please don't enter sensitive information.
+          . The model can be overconfident and shouldn't be used for real decisions. Inputs and basic browser details (IP, browser, timezone) are logged for testing. Please don't enter sensitive information.
         </div>
       </footer>
     </>

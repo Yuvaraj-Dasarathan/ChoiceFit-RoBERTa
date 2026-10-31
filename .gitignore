@@ -36,3 +36,5 @@ data/typed-*/
 node_modules/
 web/
 presentation/
+
+logs/

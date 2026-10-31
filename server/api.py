@@ -3,10 +3,12 @@
 Run:  .venv/bin/uvicorn server.api:app --host 127.0.0.1 --port 8000
 Serves POST /predict, GET /health, and the static page in web/ (if present).
 """
+import json
 import os
 import threading
 import time
 from collections import defaultdict, deque
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -31,6 +33,11 @@ GLOBAL_PER_MIN = _int("CHOICEFIT_GLOBAL_PER_MIN", 60)  # all clients together
 GLOBAL_PER_DAY = _int("CHOICEFIT_GLOBAL_PER_DAY", 2000)
 MAX_WAITING = _int("CHOICEFIT_MAX_QUEUE", 5)          # requests running or waiting
 DISABLED = os.getenv("CHOICEFIT_DISABLED") == "1"     # kill switch
+
+LOG_FILE = Path(os.getenv("CHOICEFIT_LOG", str(ROOT / "logs/requests.jsonl")))
+_log_lock = threading.Lock()
+LOGGED_HEADERS = ("user-agent", "accept-language", "referer", "origin", "sec-ch-ua", "sec-ch-ua-platform",
+                  "sec-ch-ua-mobile", "x-forwarded-for", "x-forwarded-proto", "cf-ipcountry")
 
 MAX_OPTIONS = 8
 MAX_CHARS = 2000
@@ -59,6 +66,7 @@ class PredictRequest(BaseModel):
     message: str = Field(min_length=1, max_length=MAX_CHARS)
     question: str = Field(default=DEFAULT_QUESTION, max_length=500)
     options: list[str] = Field(min_length=2, max_length=MAX_OPTIONS)
+    client: dict[str, str] | None = Field(default=None, max_length=10)
 
 
 def client_ip(request: Request) -> str:
@@ -69,6 +77,23 @@ def client_ip(request: Request) -> str:
     if entries:
         return entries[-1]
     return request.client.host if request.client else "unknown"
+
+
+def log_request(request: Request, ip: str, status: int, entry: dict) -> None:
+    """Append one JSON line per request. Logging must never break a prediction."""
+    try:
+        record = {
+            "time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "ip": ip,
+            "status": status,
+            "headers": {h: request.headers.get(h) for h in LOGGED_HEADERS if request.headers.get(h)},
+            **entry,
+        }
+        LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with _log_lock, LOG_FILE.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
 
 
 def _prune(window: deque, now: float, span: float) -> None:
@@ -116,6 +141,23 @@ def health():
 
 @app.post("/predict")
 def predict(body: PredictRequest, request: Request):
+    ip = client_ip(request)
+    started = time.monotonic()
+    entry = {"message": body.message, "question": body.question, "options": body.options,
+             "client": {k[:40]: v[:200] for k, v in (body.client or {}).items()}}
+    try:
+        response = _predict(body, ip)
+    except HTTPException as e:
+        log_request(request, ip, e.status_code, {**entry, "error": e.detail})
+        raise
+    except Exception as e:
+        log_request(request, ip, 500, {**entry, "error": repr(e)})
+        raise
+    log_request(request, ip, 200, {**entry, "result": response, "seconds": round(time.monotonic() - started, 3)})
+    return response
+
+
+def _predict(body: PredictRequest, ip: str):
     global _model
     options = [o.strip() for o in body.options]
     if any(not o for o in options):
@@ -126,7 +168,7 @@ def predict(body: PredictRequest, request: Request):
         raise HTTPException(422, "Options must be different from each other.")
     question = body.question.strip() or DEFAULT_QUESTION
     choices = {f"option_{i}": text for i, text in enumerate(options)}
-    admit(client_ip(request))
+    admit(ip)
     try:
         with _lock:
             if _model is None:
